@@ -41,6 +41,9 @@ const MAX_TIMER_MS = 2147483647
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
 const BODY_LIMIT_BYTES = 64 * 1024
 const SNIPPET_CHARS = 400
+const RESULT_STEP = 5
+const RESULT_DEFAULT = 5
+const RESULT_MAX = 100
 
 export const name = PLUGIN
 export const inject = ['web', 'webServer']
@@ -119,8 +122,13 @@ function isHttpUrl(value) {
   }
 }
 
-function domainList(value) {
-  const parts = Array.isArray(value) ? value : text(value).split(/[\s,]+/)
+/** Results per query are always a multiple of five, 5..100. */
+function quantizeResults(value, fallback = RESULT_DEFAULT) {
+  const stepped = Math.round(asNumber(value, fallback, RESULT_STEP, RESULT_MAX) / RESULT_STEP) * RESULT_STEP
+  return Math.min(RESULT_MAX, Math.max(RESULT_STEP, stepped))
+}
+
+function domainList(value) {  const parts = Array.isArray(value) ? value : text(value).split(/[\s,]+/)
   const seen = new Set()
   for (const part of parts) {
     const host = text(part).replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase()
@@ -137,7 +145,7 @@ function defaultsFromConfig(config) {
     search: {
       backend: oneOf(config.searchBackend, VENDORS, 'tavily'),
       options: {
-        maxResults: asInteger(config.searchMaxResults, 8, 1, 100),
+        maxResults: quantizeResults(config.searchMaxResults),
         includeDomains: domainList(config.includeDomains),
         excludeDomains: domainList(config.excludeDomains),
       },
@@ -202,7 +210,7 @@ function mergeSettings(base, patch) {
   if (patch.search?.options && typeof patch.search.options === 'object') {
     const incoming = patch.search.options
     const target = next.search.options
-    if (incoming.maxResults !== undefined) target.maxResults = asInteger(incoming.maxResults, target.maxResults, 1, 100)
+    if (incoming.maxResults !== undefined) target.maxResults = quantizeResults(incoming.maxResults, target.maxResults)
     if (incoming.includeDomains !== undefined) target.includeDomains = domainList(incoming.includeDomains)
     if (incoming.excludeDomains !== undefined) target.excludeDomains = domainList(incoming.excludeDomains)
   }

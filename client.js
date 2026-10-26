@@ -6,6 +6,7 @@ window.__ModuleLoader__.load({
 
     const ENDPOINT = '/web-tool-provider/state'
     const VENDORS = ['tavily', 'exa', 'firecrawl']
+    const STEPS = Array.from({ length: 20 }, (_, index) => (index + 1) * 5)
     const TOPICS = ['general', 'news', 'finance']
     const TYPES = ['auto', 'lite', 'deep']
     const VERSIONS = ['v2', 'v1']
@@ -384,10 +385,14 @@ window.__ModuleLoader__.load({
         'div',
         { style: styles.card },
         h('h3', { style: styles.cardTitle }, t('common')),
-        numericRow(t('maxResults'), state.search.options.maxResults, (value) =>
-          edit((next) => {
-            next.search.options.maxResults = value
-          }),
+        selectRow(
+          t('maxResults'),
+          String(state.search.options.maxResults),
+          STEPS.map((value) => String(value)),
+          (value) =>
+            edit((next) => {
+              next.search.options.maxResults = Number(value)
+            }),
         ),
         textRow(
           t('includeDomains'),
