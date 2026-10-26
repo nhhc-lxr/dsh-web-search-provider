@@ -41,7 +41,6 @@ const MAX_TIMER_MS = 2147483647
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
 const BODY_LIMIT_BYTES = 64 * 1024
 const SNIPPET_CHARS = 400
-const DEPTH_VALUES = ['auto', 'fast', 'balanced', 'deep']
 
 export const name = PLUGIN
 export const inject = ['web', 'webServer']
@@ -139,7 +138,6 @@ function defaultsFromConfig(config) {
       backend: oneOf(config.searchBackend, VENDORS, 'tavily'),
       options: {
         maxResults: asInteger(config.searchMaxResults, 8, 1, 100),
-        depth: oneOf(config.searchDepth, DEPTH_VALUES, 'auto'),
         includeDomains: domainList(config.includeDomains),
         excludeDomains: domainList(config.excludeDomains),
       },
@@ -205,7 +203,6 @@ function mergeSettings(base, patch) {
     const incoming = patch.search.options
     const target = next.search.options
     if (incoming.maxResults !== undefined) target.maxResults = asInteger(incoming.maxResults, target.maxResults, 1, 100)
-    if (incoming.depth !== undefined) target.depth = oneOf(incoming.depth, DEPTH_VALUES, target.depth)
     if (incoming.includeDomains !== undefined) target.includeDomains = domainList(incoming.includeDomains)
     if (incoming.excludeDomains !== undefined) target.excludeDomains = domainList(incoming.excludeDomains)
   }
@@ -250,36 +247,6 @@ function mergeSettings(base, patch) {
     }
   }
   return next
-}
-
-/* ------------------------------------------------------------ capabilities -- */
-
-const CAPABILITIES = {
-  tavily: {
-    search: { domains: 'yes', depth: 'yes' },
-    fetch: { mainContent: 'no', cache: 'no' },
-  },
-  exa: {
-    search: { domains: 'yes', depth: 'yes' },
-    fetch: { mainContent: 'no', cache: 'no' },
-  },
-  firecrawl: {
-    search: { domains: 'yes', depth: 'no' },
-    fetch: { mainContent: 'yes', cache: 'yes' },
-  },
-}
-
-const capabilityMatrix = () =>
-  Object.fromEntries(
-    VENDORS.map((vendor) => [
-      vendor,
-      { search: { ...CAPABILITIES[vendor].search }, fetch: { ...CAPABILITIES[vendor].fetch } },
-    ]),
-  )
-
-/** A shared option this backend cannot honour is reported, never silently dropped. */
-function dropOption(notices, vendor, key, reason) {
-  notices.push(`${vendor} cannot honour "${key}": ${reason}`)
 }
 
 /* -------------------------------------------------------------------- keys -- */
@@ -492,21 +459,25 @@ function composeAnswer(answer, notices) {
   return blocks.length === 0 ? undefined : blocks.join('\n\n')
 }
 
-const clampResults = (request, cap) => {
+/** A vendor caps results per query; ask for what it can give and say so. */
+function clampResults(request, cap, vendor, notices, vendorCap) {
   const requested = Number.isFinite(request?.maxResults) ? Math.round(request.maxResults) : cap
-  return Math.max(1, Math.min(cap, requested))
+  const wanted = Math.max(1, Math.min(cap, requested))
+  const effective = Math.min(wanted, vendorCap)
+  if (effective < wanted) notices.push(`${vendor} caps results at ${vendorCap} per query`)
+  return effective
 }
 
 /* ---------------------------------------------------------------- adapters -- */
 
-async function tavilySearch(ctx, settings, request, signal) {
+async function tavilySearch(ctx, settings, request, signal, notices) {
   const provider = settings.providers.tavily
   const options = settings.search.options
   const apiKey = await requireKey(ctx, 'tavily', provider)
   const body = {
     query: text(request?.query),
-    max_results: clampResults(request, options.maxResults),
-    search_depth: options.depth === 'auto' ? provider.searchDepth : options.depth === 'deep' ? 'advanced' : 'basic',
+    max_results: clampResults(request, options.maxResults, 'tavily', notices, 20),
+    search_depth: provider.searchDepth,
     topic: provider.topic,
   }
   if (provider.answer) body.include_answer = true
@@ -527,18 +498,10 @@ async function exaSearch(ctx, settings, request, signal, notices) {
   const provider = settings.providers.exa
   const options = settings.search.options
   const apiKey = await requireKey(ctx, 'exa', provider)
-  const type =
-    options.depth === 'auto'
-      ? provider.searchType
-      : options.depth === 'fast'
-        ? 'lite'
-        : options.depth === 'deep'
-          ? 'deep'
-          : 'auto'
   const body = {
     query: text(request?.query),
-    type,
-    numResults: clampResults(request, options.maxResults),
+    type: provider.searchType,
+    numResults: clampResults(request, options.maxResults, 'exa', notices, 100),
     contents: { highlights: true },
   }
   if (options.includeDomains.length > 0) body.includeDomains = options.includeDomains
@@ -560,11 +523,8 @@ async function firecrawlSearch(ctx, settings, request, signal, notices) {
   const apiKey = await requireKey(ctx, 'firecrawl', provider)
   const body = {
     query: text(request?.query),
-    limit: clampResults(request, options.maxResults),
+    limit: clampResults(request, options.maxResults, 'firecrawl', notices, 100),
     sources: ['web'],
-  }
-  if (options.depth !== 'auto') {
-    dropOption(notices, 'firecrawl', 'depth', 'its search has no depth setting')
   }
   if (options.includeDomains.length > 0) body.includeDomains = options.includeDomains
   if (options.excludeDomains.length > 0) body.excludeDomains = options.excludeDomains
@@ -945,7 +905,6 @@ function createStateRoutes(ctx, state) {
         return [vendor, { ...rest, key: state.keys[vendor] }]
       }),
     ),
-    capabilities: capabilityMatrix(),
     stateFile: state.storage ?? stateFileCandidates()[0],
   })
 

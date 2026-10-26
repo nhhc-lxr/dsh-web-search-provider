@@ -6,7 +6,6 @@ window.__ModuleLoader__.load({
 
     const ENDPOINT = '/web-tool-provider/state'
     const VENDORS = ['tavily', 'exa', 'firecrawl']
-    const DEPTH = ['auto', 'fast', 'balanced', 'deep']
     const TOPICS = ['general', 'news', 'finance']
     const TYPES = ['auto', 'lite', 'deep']
     const VERSIONS = ['v2', 'v1']
@@ -33,11 +32,8 @@ window.__ModuleLoader__.load({
         fromEnv: 'from environment',
         fromConfig: 'from plugin config',
         missing: 'not configured',
-        supported: 'supported',
         partial: 'partial',
-        unsupported: 'unsupported',
         maxResults: 'Results per query',
-        depth: 'Search depth',
         includeDomains: 'Only these domains',
         excludeDomains: 'Exclude these domains',
         answer: 'Return a synthesized answer',
@@ -46,8 +42,8 @@ window.__ModuleLoader__.load({
         timeoutMs: 'Timeout (ms)',
         maxChars: 'Max characters',
         topic: 'Topic',
-        searchDepth: 'Tavily depth when the knob is auto',
-        searchType: 'Exa type when the knob is auto',
+        searchDepth: 'Depth (basic / advanced)',
+        searchType: 'Depth (lite / auto / deep)',
         version: 'API version',
         mainContent: 'Only main content',
         maxAge: 'Cache max age (ms)',
@@ -90,11 +86,8 @@ window.__ModuleLoader__.load({
         fromEnv: '来自环境变量',
         fromConfig: '来自插件配置',
         missing: '未配置',
-        supported: '支持',
         partial: '部分支持',
-        unsupported: '不支持',
         maxResults: '每次查询条数',
-        depth: '检索深度',
         includeDomains: '只搜这些域名',
         excludeDomains: '排除这些域名',
         answer: '返回合成答案',
@@ -103,8 +96,8 @@ window.__ModuleLoader__.load({
         timeoutMs: '超时（毫秒）',
         maxChars: '正文上限（字符）',
         topic: '主题',
-        searchDepth: '深度为 auto 时 Tavily 用',
-        searchType: '深度为 auto 时 Exa 用',
+        searchDepth: '深度（基础 / 进阶）',
+        searchType: '深度（轻量 / 自动 / 深度）',
         version: '接口版本',
         mainContent: '只取正文',
         maxAge: '缓存有效期（毫秒）',
@@ -264,13 +257,6 @@ window.__ModuleLoader__.load({
         .map((entry) => entry.trim())
         .filter(Boolean)
 
-    function supportOf(capabilities, backend, capability) {
-      const table = capabilities && capabilities[backend]
-      const search = table && table.search
-      const value = search && search[capability]
-      return typeof value === 'string' ? value : 'yes'
-    }
-
     function badgeStyle(kind) {
       if (kind === 'no') return { ...styles.badge, color: 'var(--dsw-alias-state-error-primary)' }
       if (kind === 'partial') return { ...styles.badge, color: 'var(--dsw-alias-state-warn-primary)' }
@@ -340,9 +326,6 @@ window.__ModuleLoader__.load({
         return h('div', { style: styles.page }, h('p', { style: styles.error }, `${t('loadFailed')}${error}`))
       }
 
-      const capabilities = state.capabilities || {}
-      const capabilitiesFor = tab === 'search' ? state.search.backend : state.fetch.backend
-
       const edit = (mutate) => {
         const next = clone(state)
         mutate(next)
@@ -380,7 +363,7 @@ window.__ModuleLoader__.load({
           }),
         )
 
-      const selectRow = (label, value, values, onChange, support) =>
+      const selectRow = (label, value, values, onChange) =>
         h(
           'div',
           { style: styles.row, key: label },
@@ -390,21 +373,12 @@ window.__ModuleLoader__.load({
             {
               style: styles.select,
               value: value,
-              disabled: busy || support === 'no',
+              disabled: busy,
               onChange: (event) => onChange(event.target.value),
             },
             values.map(optionTag),
           ),
-          support === undefined
-            ? null
-            : h(
-                'span',
-                { style: badgeStyle(support) },
-                t(support === 'no' ? 'unsupported' : support === 'partial' ? 'partial' : 'supported'),
-              ),
         )
-
-      const supportFor = (capability) => supportOf(capabilities, capabilitiesFor, capability)
 
       const searchCommon = h(
         'div',
@@ -414,16 +388,6 @@ window.__ModuleLoader__.load({
           edit((next) => {
             next.search.options.maxResults = value
           }),
-        ),
-        selectRow(
-          t('depth'),
-          state.search.options.depth,
-          DEPTH,
-          (value) =>
-            edit((next) => {
-              next.search.options.depth = value
-            }),
-          supportFor('depth'),
         ),
         textRow(
           t('includeDomains'),

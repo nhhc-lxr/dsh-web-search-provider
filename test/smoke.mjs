@@ -168,14 +168,14 @@ await check('dates become YYYY-MM-DD and long snippets are clipped', async () =>
 
 await check('shared options reach tavily as its own parameters', async () => {
   stubFetch(() => json(TAVILY))
-  const { registry, route } = harness({ ...KEYS, tavilyTopic: 'news' })
+  const { registry, route } = harness({ ...KEYS, tavilyTopic: 'news', tavilySearchDepth: 'advanced' })
   await call(route, {
     method: 'POST',
-    body: { search: { options: { depth: 'deep', includeDomains: ['a.com'], excludeDomains: ['b.com'], maxResults: 5 } } },
+    body: { search: { options: { includeDomains: ['a.com'], excludeDomains: ['b.com'], maxResults: 5 } } },
   })
   await registry.search.search({ query: 'q', maxResults: 9 })
-  assert.equal(calls[0].body.search_depth, 'advanced')
   assert.equal(calls[0].body.topic, 'news')
+  assert.equal(calls[0].body.search_depth, 'advanced')
   assert.equal(calls[0].body.max_results, 5)
   assert.deepEqual(calls[0].body.include_domains, ['a.com'])
   assert.deepEqual(calls[0].body.exclude_domains, ['b.com'])
@@ -183,8 +183,8 @@ await check('shared options reach tavily as its own parameters', async () => {
 
 await check('the same shared options reach exa as ITS parameters', async () => {
   stubFetch(() => json({ results: [] }))
-  const { registry, route } = harness(KEYS)
-  await call(route, { method: 'POST', body: { search: { backend: 'exa', options: { depth: 'fast', includeDomains: ['a.com'] } } } })
+  const { registry, route } = harness({ ...KEYS, exaSearchType: 'lite' })
+  await call(route, { method: 'POST', body: { search: { backend: 'exa', options: { includeDomains: ['a.com'] } } } })
   await registry.search.search({ query: 'q' })
   assert.equal(calls[0].url, 'https://api.exa.ai/search')
   assert.equal(calls[0].body.type, 'lite')
@@ -202,12 +202,13 @@ await check('the same shared options reach firecrawl as ITS parameters', async (
 
 /* ------------------------------------------------------ degrade + strict -- */
 
-await check('an unsupported shared option becomes a notice, never a failure', async () => {
-  stubFetch(() => json({ success: true, data: { web: [{ title: 'T', url: 'https://x.test/', description: 'd' }] } }))
-  const { registry, route } = harness(KEYS)
-  await call(route, { method: 'POST', body: { search: { backend: 'firecrawl', options: { depth: 'deep' } } } })
+await check('a vendor result cap is applied and reported', async () => {
+  stubFetch(() => json(TAVILY))
+  const { registry, route } = harness({ ...KEYS, searchMaxResults: 50 })
+  await call(route, { method: 'POST', body: {} })
   const out = await registry.search.search({ query: 'q' })
-  assert.match(out.content, /> provider notice: firecrawl cannot honour "depth"/)
+  assert.equal(calls[0].body.max_results, 20)
+  assert.match(out.content, /tavily caps results at 20 per query/)
   assert.equal(out.sources.length, 1)
 })
 
@@ -300,20 +301,19 @@ await check('the fallback switch is honoured', async () => {
 
 /* ----------------------------------------------------------------- state -- */
 
-await check('GET exposes the layered shape and the capability matrix', async () => {
-  const { route } = harness({ searchDepth: 'fast' })
+await check('GET exposes the layered shape', async () => {
+  const { route } = harness({ maxResults: 9, searchMaxResults: 9 })
   const { payload } = await call(route, {})
   assert.equal(payload.search.backend, 'tavily')
-  assert.equal(payload.search.options.depth, 'fast')
+  assert.equal(payload.search.options.maxResults, 9)
+  assert.equal(payload.search.options.depth, undefined)
   assert.equal(payload.fetch.backend, 'firecrawl')
   assert.equal(payload.fetch.options.fallbackToHttp, true)
   assert.equal(payload.providers.tavily.topic, 'general')
-  assert.equal(payload.providers.tavily.answer, true)
+  assert.equal(payload.providers.tavily.searchDepth, 'basic')
+  assert.equal(payload.providers.exa.searchType, 'auto')
   assert.equal(payload.providers.firecrawl.version, 'v2')
-  assert.equal(payload.search.options.answer, undefined)
-  assert.equal(payload.search.options.strict, undefined)
-  assert.equal(payload.capabilities.firecrawl.search.depth, 'no')
-  assert.equal(payload.capabilities.tavily.search.depth, 'yes')
+  assert.equal(payload.capabilities, undefined)
   assert.equal(payload.providers.tavily.apiKey, undefined)
 })
 
