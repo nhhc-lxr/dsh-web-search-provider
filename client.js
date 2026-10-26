@@ -8,23 +8,21 @@ window.__ModuleLoader__.load({
     const VENDORS = ['tavily', 'exa', 'firecrawl']
     const LABELS = { tavily: 'Tavily', exa: 'Exa', firecrawl: 'Firecrawl' }
     const labelOf = (vendor) => LABELS[vendor] || vendor
-    const TOPICS = ['general', 'news', 'finance']
-    const TYPES = ['auto', 'lite', 'deep']
-    const VERSIONS = ['v2', 'v1']
 
     const DICT = {
       en: {
         tab: 'Web tools',
         title: 'Web tool provider',
         subtitle:
-          'One provider in front of web_search and web_fetch. Shared options are set once per tool; each backend keeps its own connection settings.',
-        tabsSearch: 'web_search',
-        tabsFetch: 'web_fetch',
-        common: 'Shared search options',
-        commonFetch: 'Shared fetch options',
+          'Pick one backend for each tool. Keys live in the harness credential store; every other vendor parameter is handled by the plugin.',
+        backends: 'Backends',
+        searchBackend: 'web_search',
+        fetchBackend: 'web_fetch',
+        options: 'Shared options',
+        includeDomains: 'Only these domains',
+        excludeDomains: 'Exclude these domains',
+        fallback: 'Fall back to a direct HTTP fetch when the backend fails',
         keys: 'API keys',
-        active: 'active',
-        use: 'Use for this tool',
         save: 'Save',
         clear: 'Clear',
         saved: 'Saved',
@@ -34,49 +32,24 @@ window.__ModuleLoader__.load({
         fromEnv: 'from environment',
         fromConfig: 'from plugin config',
         missing: 'not configured',
-        partial: 'partial',
-        includeDomains: 'Only these domains',
-        excludeDomains: 'Exclude these domains',
-        fallback: 'Fall back to a direct HTTP fetch when the backend fails',
-        baseURL: 'API base URL',
-        timeoutMs: 'Timeout (ms)',
-        maxChars: 'Max characters',
-        topic: 'Topic',
-        searchDepth: 'Depth (basic / advanced)',
-        searchType: 'Depth (lite / auto / deep)',
-        version: 'API version',
-        mainContent: 'Only main content',
-        maxAge: 'Cache max age (ms)',
         loading: 'Loading…',
         loadFailed: 'Could not read the plugin state: ',
         keyPlaceholder: 'Paste the key',
-        perCall: 'Applies to the next call — no restart needed.',
         domainsPlaceholder: 'a.com, b.com',
-        auto: 'auto',
-        fast: 'fast',
-        balanced: 'balanced',
-        deep: 'deep',
-        general: 'general',
-        news: 'news',
-        finance: 'finance',
-        lite: 'lite',
-        basic: 'basic',
-        advanced: 'advanced',
-        v1: 'v1',
-        v2: 'v2',
+        perCall: 'Applies to the next call — no restart needed.',
       },
       zh: {
         tab: '网页工具',
         title: '网页工具后端',
-        subtitle:
-          'web_search 与 web_fetch 共用一个 provider。通用参数按工具各设一次，各家只保留自己的连接与行为设置。',
-        tabsSearch: '搜索 web_search',
-        tabsFetch: '抓取 web_fetch',
-        common: '通用搜索参数',
-        commonFetch: '通用抓取参数',
+        subtitle: '给两个工具各选一个后端。密钥存在 Harness 凭据库里，其余厂商参数由插件负责。',
+        backends: '后端选择',
+        searchBackend: '搜索 web_search',
+        fetchBackend: '抓取 web_fetch',
+        options: '通用选项',
+        includeDomains: '只搜这些域名',
+        excludeDomains: '排除这些域名',
+        fallback: '后端失败时退回直接 HTTP 抓取',
         keys: 'API 密钥',
-        active: '使用中',
-        use: '设为该工具后端',
         save: '保存',
         clear: '清除',
         saved: '已保存',
@@ -86,36 +59,11 @@ window.__ModuleLoader__.load({
         fromEnv: '来自环境变量',
         fromConfig: '来自插件配置',
         missing: '未配置',
-        partial: '部分支持',
-        includeDomains: '只搜这些域名',
-        excludeDomains: '排除这些域名',
-        fallback: '后端失败时退回直接 HTTP 抓取',
-        baseURL: '接口地址',
-        timeoutMs: '超时（毫秒）',
-        maxChars: '正文上限（字符）',
-        topic: '主题',
-        searchDepth: '深度（基础 / 进阶）',
-        searchType: '深度（轻量 / 自动 / 深度）',
-        version: '接口版本',
-        mainContent: '只取正文',
-        maxAge: '缓存有效期（毫秒）',
         loading: '加载中…',
         loadFailed: '读取插件状态失败：',
         keyPlaceholder: '粘贴密钥',
-        perCall: '下一次调用即生效，不用重启。',
         domainsPlaceholder: 'a.com, b.com',
-        auto: '自动',
-        fast: '快',
-        balanced: '均衡',
-        deep: '深度',
-        general: '综合',
-        news: '新闻',
-        finance: '财经',
-        lite: '轻量',
-        basic: '基础',
-        advanced: '进阶',
-        v1: 'v1',
-        v2: 'v2',
+        perCall: '下一次调用即生效，不用重启。',
       },
     }
 
@@ -149,7 +97,7 @@ window.__ModuleLoader__.load({
     }
 
     const styles = {
-      page: { padding: '4px 0 24px', maxWidth: 780, color: 'var(--dsw-alias-label-primary)' },
+      page: { padding: '4px 0 24px', maxWidth: 640, color: 'var(--dsw-alias-label-primary)' },
       title: { margin: '0 0 6px', fontSize: 15, fontWeight: 600 },
       subtitle: { margin: '0 0 16px', fontSize: 12, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)' },
       card: {
@@ -159,12 +107,11 @@ window.__ModuleLoader__.load({
         padding: '14px 16px',
         marginBottom: 14,
       },
-      cardHead: { display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 12px', flexWrap: 'wrap' },
-      cardTitle: { margin: 0, fontSize: 13, fontWeight: 600 },
+      cardTitle: { margin: '0 0 12px', fontSize: 13, fontWeight: 600 },
       row: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' },
-      label: { fontSize: 12, minWidth: 150, color: 'var(--dsw-alias-label-secondary)' },
+      label: { fontSize: 12, minWidth: 130, color: 'var(--dsw-alias-label-secondary)' },
       select: {
-        flex: '1 1 170px',
+        flex: '1 1 180px',
         minWidth: 150,
         height: 30,
         padding: '0 8px',
@@ -175,8 +122,8 @@ window.__ModuleLoader__.load({
         borderRadius: 7,
       },
       input: {
-        flex: '1 1 200px',
-        minWidth: 160,
+        flex: '1 1 220px',
+        minWidth: 170,
         height: 30,
         padding: '0 9px',
         fontSize: 12,
@@ -205,18 +152,7 @@ window.__ModuleLoader__.load({
         borderRadius: 7,
         cursor: 'pointer',
       },
-      tabBar: { display: 'flex', gap: 6, marginBottom: 14 },
-      tab: (active) => ({
-        height: 30,
-        padding: '0 14px',
-        fontSize: 12,
-        fontWeight: active ? 600 : 400,
-        color: active ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
-        background: active ? 'var(--dsw-alias-bg-layer-1)' : 'transparent',
-        border: `1px solid ${active ? 'var(--dsw-alias-border-l2)' : 'transparent'}`,
-        borderRadius: 8,
-        cursor: 'pointer',
-      }),
+      vendor: { fontSize: 12, fontWeight: 600, minWidth: 76 },
       badge: {
         fontSize: 11,
         padding: '2px 7px',
@@ -224,7 +160,6 @@ window.__ModuleLoader__.load({
         border: '1px solid currentColor',
         whiteSpace: 'nowrap',
       },
-      vendorName: { fontSize: 12, fontWeight: 600, minWidth: 76 },
       note: { margin: '10px 0 0', fontSize: 11, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)' },
       error: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' },
       ok: { fontSize: 12, color: 'var(--dsw-alias-state-success-primary)' },
@@ -247,7 +182,6 @@ window.__ModuleLoader__.load({
       return payload
     }
 
-    const clone = (value) => JSON.parse(JSON.stringify(value))
     const joinDomains = (value) => (Array.isArray(value) ? value.join(', ') : '')
     const splitDomains = (value) =>
       String(value)
@@ -257,7 +191,6 @@ window.__ModuleLoader__.load({
 
     function badgeStyle(kind) {
       if (kind === 'no') return { ...styles.badge, color: 'var(--dsw-alias-state-error-primary)' }
-      if (kind === 'partial') return { ...styles.badge, color: 'var(--dsw-alias-state-warn-primary)' }
       return { ...styles.badge, color: 'var(--dsw-alias-state-success-primary)' }
     }
 
@@ -275,7 +208,6 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState('')
       const [busy, setBusy] = React.useState(false)
       const [notice, setNotice] = React.useState('')
-      const [tab, setTab] = React.useState('search')
       const [draftKeys, setDraftKeys] = React.useState({})
       const t = React.useMemo(() => createTranslate({ get: () => undefined }), [])
 
@@ -325,87 +257,91 @@ window.__ModuleLoader__.load({
       }
 
       const edit = (mutate) => {
-        const next = clone(state)
+        const next = JSON.parse(JSON.stringify(state))
         mutate(next)
         setState(next)
       }
 
-      const optionTag = (value) => h('option', { key: value, value }, LABELS[value] || t(value))
+      const optionTag = (value) => h('option', { key: value, value }, labelOf(value))
 
-      const numericRow = (label, value, onInput) =>
+      const backends = h(
+        'div',
+        { style: styles.card },
+        h('h3', { style: styles.cardTitle }, t('backends')),
         h(
           'div',
-          { style: styles.row, key: label },
-          h('span', { style: styles.label }, label),
-          h('input', {
-            style: styles.input,
-            type: 'number',
-            value: value,
-            disabled: busy,
-            onChange: (event) => onInput(Number(event.target.value)),
-          }),
-        )
-
-      const textRow = (label, value, onInput, placeholder) =>
-        h(
-          'div',
-          { style: styles.row, key: label },
-          h('span', { style: styles.label }, label),
-          h('input', {
-            style: styles.input,
-            type: 'text',
-            value: value,
-            placeholder: placeholder || '',
-            disabled: busy,
-            onChange: (event) => onInput(event.target.value),
-          }),
-        )
-
-      const selectRow = (label, value, values, onChange) =>
-        h(
-          'div',
-          { style: styles.row, key: label },
-          h('span', { style: styles.label }, label),
+          { style: styles.row },
+          h('span', { style: styles.label }, t('searchBackend')),
           h(
             'select',
             {
               style: styles.select,
-              value: value,
+              value: state.search.backend,
               disabled: busy,
-              onChange: (event) => onChange(event.target.value),
+              onChange: (event) =>
+                edit((next) => {
+                  next.search.backend = event.target.value
+                }),
             },
-            values.map(optionTag),
+            VENDORS.map(optionTag),
           ),
-        )
-
-      const searchCommon = h(
-        'div',
-        { style: styles.card },
-        h('h3', { style: styles.cardTitle }, t('common')),
-        textRow(
-          t('includeDomains'),
-          joinDomains(state.search.options.includeDomains),
-          (value) =>
-            edit((next) => {
-              next.search.options.includeDomains = splitDomains(value)
-            }),
-          t('domainsPlaceholder'),
         ),
-        textRow(
-          t('excludeDomains'),
-          joinDomains(state.search.options.excludeDomains),
-          (value) =>
-            edit((next) => {
-              next.search.options.excludeDomains = splitDomains(value)
-            }),
-          t('domainsPlaceholder'),
+        h(
+          'div',
+          { style: styles.row },
+          h('span', { style: styles.label }, t('fetchBackend')),
+          h(
+            'select',
+            {
+              style: styles.select,
+              value: state.fetch.backend,
+              disabled: busy,
+              onChange: (event) =>
+                edit((next) => {
+                  next.fetch.backend = event.target.value
+                }),
+            },
+            VENDORS.map(optionTag),
+          ),
         ),
       )
 
-      const fetchCommon = h(
+      const options = h(
         'div',
         { style: styles.card },
-        h('h3', { style: styles.cardTitle }, t('commonFetch')),
+        h('h3', { style: styles.cardTitle }, t('options')),
+        h(
+          'div',
+          { style: styles.row },
+          h('span', { style: styles.label }, t('includeDomains')),
+          h('input', {
+            style: styles.input,
+            type: 'text',
+            placeholder: t('domainsPlaceholder'),
+            value: joinDomains(state.search.options.includeDomains),
+            disabled: busy,
+            onChange: (event) =>
+              edit((next) => {
+                next.search.options.includeDomains = splitDomains(event.target.value)
+              }),
+          }),
+        ),
+        h(
+          'div',
+          { style: styles.row },
+          h('span', { style: styles.label }, t('excludeDomains')),
+          h('input', {
+            style: styles.input,
+            type: 'text',
+            placeholder: t('domainsPlaceholder'),
+            value: joinDomains(state.search.options.excludeDomains),
+            disabled: busy,
+            onChange: (event) =>
+              edit((next) => {
+                next.search.options.excludeDomains = splitDomains(event.target.value)
+              }),
+          }),
+        ),
         h(
           'div',
           { style: styles.row },
@@ -420,141 +356,15 @@ window.__ModuleLoader__.load({
               }),
           }),
         ),
-        h('p', { style: styles.note }, t('perCall')),
       )
 
-      const providerCard = (vendor) => {
-        const provider = state.providers[vendor]
-        const activeBackend = tab === 'search' ? state.search.backend : state.fetch.backend
-        const isActive = activeBackend === vendor
-        const rows = [
-          textRow(
-            t('baseURL'),
-            provider.baseURL,
-            (value) =>
-              edit((next) => {
-                next.providers[vendor].baseURL = value
-              }),
-            '',
-          ),
-          numericRow(t('timeoutMs'), provider.timeoutMs, (value) =>
-            edit((next) => {
-              next.providers[vendor].timeoutMs = value
-            }),
-          ),
-          numericRow(t('maxChars'), provider.maxChars, (value) =>
-            edit((next) => {
-              next.providers[vendor].maxChars = value
-            }),
-          ),
-        ]
-
-        if (tab === 'search' && vendor === 'tavily') {
-          rows.push(
-            selectRow(t('topic'), provider.topic, TOPICS, (value) =>
-              edit((next) => {
-                next.providers.tavily.topic = value
-              }),
-            ),
-            selectRow(t('searchDepth'), provider.searchDepth, ['basic', 'fast', 'advanced'], (value) =>
-              edit((next) => {
-                next.providers.tavily.searchDepth = value
-              }),
-            )
-          )
-        }
-        if (tab === 'search' && vendor === 'exa') {
-          rows.push(
-            selectRow(t('searchType'), provider.searchType, TYPES, (value) =>
-              edit((next) => {
-                next.providers.exa.searchType = value
-              }),
-            ),
-          )
-        }
-        if (vendor === 'firecrawl') {
-          rows.push(
-            selectRow(t('version'), provider.version, VERSIONS, (value) =>
-              edit((next) => {
-                next.providers.firecrawl.version = value
-              }),
-            ),
-          )
-          if (tab === 'fetch') {
-            rows.push(
-              h(
-                'div',
-                { style: styles.row, key: 'mainContent' },
-                h('span', { style: styles.label }, t('mainContent')),
-                h('input', {
-                  type: 'checkbox',
-                  checked: Boolean(provider.mainContent),
-                  disabled: busy,
-                  onChange: (event) =>
-                    edit((next) => {
-                      next.providers.firecrawl.mainContent = event.target.checked
-                    }),
-                }),
-              ),
-              numericRow(t('maxAge'), provider.maxAge, (value) =>
-                edit((next) => {
-                  next.providers.firecrawl.maxAge = value
-                }),
-              ),
-            )
-          }
-        }
-
-        return h(
-          'div',
-          { style: styles.card, key: vendor },
-          h(
-            'div',
-            { style: styles.cardHead },
-            h('span', { style: styles.vendorName }, labelOf(vendor)),
-            keyBadge(t, provider.key),
-            isActive ? h('span', { style: badgeStyle('yes') }, t('active')) : null,
-            isActive
-              ? null
-              : h(
-                  'button',
-                  {
-                    style: styles.button,
-                    disabled: busy,
-                    onClick: () =>
-                      apply(
-                        tab === 'search' ? { search: { backend: vendor } } : { fetch: { backend: vendor } },
-                        'saved',
-                      ),
-                  },
-                  t('use'),
-                ),
-          ),
-          rows,
-        )
-      }
-
-      const saveTab = () => {
-        const body =
-          tab === 'search'
-            ? {
-                search: { backend: state.search.backend, options: state.search.options },
-                providers: state.providers,
-              }
-            : {
-                fetch: { backend: state.fetch.backend, options: state.fetch.options },
-                providers: state.providers,
-              }
-        apply(body, 'saved')
-      }
-
       const keyRows = VENDORS.map((vendor) => {
-        const key = state.providers[vendor].key || {}
+        const key = (state.keys && state.keys[vendor]) || {}
         const draft = draftKeys[vendor] === undefined ? '' : draftKeys[vendor]
         return h(
           'div',
           { key: vendor, style: styles.row },
-          h('span', { style: styles.vendorName }, labelOf(vendor)),
+          h('span', { style: styles.vendor }, labelOf(vendor)),
           keyBadge(t, key),
           h('input', {
             style: styles.input,
@@ -592,23 +402,42 @@ window.__ModuleLoader__.load({
         { style: styles.page },
         h('h2', { style: styles.title }, t('title')),
         h('p', { style: styles.subtitle }, t('subtitle')),
+        backends,
+        options,
         h('div', { style: styles.card }, h('h3', { style: styles.cardTitle }, t('keys')), keyRows),
-        h(
-          'div',
-          { style: styles.tabBar },
-          h('button', { style: styles.tab(tab === 'search'), onClick: () => setTab('search') }, t('tabsSearch')),
-          h('button', { style: styles.tab(tab === 'fetch'), onClick: () => setTab('fetch') }, t('tabsFetch')),
-        ),
-        tab === 'search' ? searchCommon : fetchCommon,
-        VENDORS.map(providerCard),
         h(
           'div',
           { style: styles.row },
           h('span', { style: styles.label }, ''),
-          h('button', { style: styles.primary, disabled: busy, onClick: saveTab }, t('save')),
+          h(
+            'button',
+            {
+              style: styles.primary,
+              disabled: busy,
+              onClick: () =>
+                apply(
+                  {
+                    search: {
+                      backend: state.search.backend,
+                      options: {
+                        includeDomains: state.search.options.includeDomains,
+                        excludeDomains: state.search.options.excludeDomains,
+                      },
+                    },
+                    fetch: {
+                      backend: state.fetch.backend,
+                      options: { fallbackToHttp: state.fetch.options.fallbackToHttp },
+                    },
+                  },
+                  'saved',
+                ),
+            },
+            t('save'),
+          ),
         ),
         notice === '' ? null : h('p', { style: styles.ok }, notice),
         error === '' ? null : h('p', { style: styles.error }, error),
+        h('p', { style: styles.note }, t('perCall')),
         state.stateFile ? h('p', { style: styles.note }, state.stateFile) : null,
       )
     }

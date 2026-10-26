@@ -179,9 +179,10 @@ await check('shared options reach tavily as its own parameters', async () => {
   assert.equal(calls[0].body.include_published_date, true)
   assert.equal('include_answer' in calls[0].body, false)
   assert.equal(calls[0].body.max_results, 5)
+  // A providers patch is ignored now: those knobs are no longer a surface.
   await call(route, { method: 'POST', body: { providers: { tavily: { searchDepth: 'fast' } } } })
   await registry.search.search({ query: 'q' })
-  assert.equal(calls.at(-1).body.search_depth, 'fast')
+  assert.equal(calls.at(-1).body.search_depth, 'advanced')
   assert.deepEqual(calls[0].body.include_domains, ['a.com'])
   assert.deepEqual(calls[0].body.exclude_domains, ['b.com'])
 })
@@ -309,49 +310,46 @@ await check('the fallback switch is honoured', async () => {
 
 /* ----------------------------------------------------------------- state -- */
 
-await check('GET exposes the layered shape', async () => {
-  const { route } = harness({ searchMaxResults: 9 })
+await check('GET exposes the two layers and the key state', async () => {
+  const { route } = harness({})
   const { payload } = await call(route, {})
   assert.equal(payload.search.backend, 'tavily')
   assert.equal(payload.search.options.depth, undefined)
   assert.equal(payload.fetch.backend, 'firecrawl')
   assert.equal(payload.fetch.options.fallbackToHttp, true)
-  assert.equal(payload.providers.tavily.topic, 'general')
-  assert.equal(payload.providers.tavily.searchDepth, 'basic')
-  assert.equal(payload.providers.exa.searchType, 'auto')
-  assert.equal(payload.providers.firecrawl.version, 'v2')
-  assert.equal(payload.capabilities, undefined)
-  assert.equal(payload.providers.tavily.apiKey, undefined)
+  assert.equal(payload.providers, undefined)
+  assert.equal(payload.keys.tavily.configured, false)
 })
 
-await check('POST persists settings per layer and a restart picks them up', async () => {
+await check('POST persists the two layers and a restart picks them up', async () => {
   const { route } = harness({})
   const out = await call(route, {
     method: 'POST',
     body: {
       search: { backend: 'exa', options: { includeDomains: ['a.com', 'b.com'] } },
-      providers: { firecrawl: { maxAge: 60000, version: 'v1' } },
+      fetch: { backend: 'tavily' },
     },
   })
   assert.equal(out.payload.persistence.persisted, true)
   const stored = JSON.parse(readFileSync(join(SANDBOX, 'web-tool-provider', 'state.json'), 'utf8'))
   assert.equal(stored.search.backend, 'exa')
-  assert.equal(stored.providers.firecrawl.maxAge, 60000)
-  assert.equal(stored.providers.firecrawl.apiKey, undefined, 'never writes a literal key')
+  assert.equal(stored.fetch.backend, 'tavily')
+  assert.equal(stored.providers, undefined)
 
   const restarted = harness({})
   const snapshot = await call(restarted.route, {})
   assert.equal(snapshot.payload.search.backend, 'exa')
+  assert.equal(snapshot.payload.fetch.backend, 'tavily')
   assert.deepEqual(snapshot.payload.search.options.includeDomains, ['a.com', 'b.com'])
-  assert.equal(snapshot.payload.providers.firecrawl.maxAge, 60000)
 })
 
-await check('per-provider edits change the next request', async () => {
+await check('vendor defaults still come from Config, not from the page', async () => {
   stubFetch(() => json(TAVILY))
-  const { registry, route } = harness(KEYS)
-  await call(route, {
-    method: 'POST',
-    body: { providers: { tavily: { baseURL: 'https://gateway.test/tavily', searchDepth: 'advanced', topic: 'finance' } } },
+  const { registry } = harness({
+    ...KEYS,
+    tavilyBaseURL: 'https://gateway.test/tavily/',
+    tavilySearchDepth: 'advanced',
+    tavilyTopic: 'finance',
   })
   await registry.search.search({ query: 'q' })
   assert.equal(calls[0].url, 'https://gateway.test/tavily/search')
@@ -359,18 +357,11 @@ await check('per-provider edits change the next request', async () => {
   assert.equal(calls[0].body.topic, 'finance')
 })
 
-await check('a bad base URL is rejected before it is stored', async () => {
-  const { route } = harness({})
-  const out = await call(route, { method: 'POST', body: { providers: { exa: { baseURL: 'ftp://nope' } } } })
-  assert.equal(out.status, 400)
-  assert.match(out.payload.error, /absolute http\(s\) URL/)
-})
-
 await check('keys go through the credential service, never the state file', async () => {
   const credentials = fakeCredentials({})
   const { route } = harness({}, { credentials })
   const saved = await call(route, { method: 'POST', body: { setKey: { vendor: 'exa', value: 'exa-new' } } })
-  assert.equal(saved.payload.providers.exa.key.configured, true)
+  assert.equal(saved.payload.keys.exa.configured, true)
   assert.deepEqual(credentials.writes[0], ['set', 'EXA_API_KEY', 'exa-new'])
   await call(route, { method: 'POST', body: { clearKey: { vendor: 'exa' } } })
   assert.deepEqual(credentials.writes[1], ['unset', 'EXA_API_KEY'])

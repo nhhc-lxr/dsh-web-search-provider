@@ -219,36 +219,6 @@ function mergeSettings(base, patch) {
       next.fetch.options.fallbackToHttp = asBoolean(incoming.fallbackToHttp, next.fetch.options.fallbackToHttp)
     }
   }
-  if (patch.providers && typeof patch.providers === 'object') {
-    for (const vendor of VENDORS) {
-      const incoming = patch.providers[vendor]
-      if (!incoming || typeof incoming !== 'object') continue
-      const target = next.providers[vendor]
-      if (incoming.baseURL !== undefined) {
-        const candidate = stripSlash(text(incoming.baseURL))
-        if (!isHttpUrl(candidate)) throw new Error(`${vendor}.baseURL must be an absolute http(s) URL`)
-        target.baseURL = candidate
-      }
-      if (incoming.timeoutMs !== undefined) {
-        target.timeoutMs = asInteger(incoming.timeoutMs, target.timeoutMs, 1000, MAX_TIMER_MS)
-      }
-      if (incoming.maxChars !== undefined) target.maxChars = asInteger(incoming.maxChars, target.maxChars, 1000, 5000000)
-      if (vendor === 'tavily') {
-        if (incoming.topic !== undefined) target.topic = oneOf(incoming.topic, ['general', 'news', 'finance'], target.topic)
-        if (incoming.searchDepth !== undefined) {
-          target.searchDepth = oneOf(incoming.searchDepth, ['basic', 'fast', 'advanced'], target.searchDepth)
-        }
-      }
-      if (vendor === 'exa' && incoming.searchType !== undefined) {
-        target.searchType = oneOf(incoming.searchType, ['auto', 'lite', 'deep'], target.searchType)
-      }
-      if (vendor === 'firecrawl') {
-        if (incoming.version !== undefined) target.version = oneOf(incoming.version, ['v1', 'v2'], target.version)
-        if (incoming.mainContent !== undefined) target.mainContent = asBoolean(incoming.mainContent, target.mainContent)
-        if (incoming.maxAge !== undefined) target.maxAge = asInteger(incoming.maxAge, target.maxAge, 0, 604800000)
-      }
-    }
-  }
   return next
 }
 
@@ -350,13 +320,6 @@ function persistSettings(settings) {
       const payload = {
         search: settings.search,
         fetch: settings.fetch,
-        providers: Object.fromEntries(
-          VENDORS.map((vendor) => {
-            // Never write a literal key to disk; the credential store owns it.
-            const { apiKey, ...rest } = settings.providers[vendor]
-            return [vendor, rest]
-          }),
-        ),
         updatedAt: new Date().toISOString(),
       }
       writeFileSync(temporary, `${JSON.stringify(payload, null, 2)}\n`)
@@ -893,12 +856,7 @@ function createStateRoutes(ctx, state) {
   const snapshot = () => ({
     search: state.settings.search,
     fetch: state.settings.fetch,
-    providers: Object.fromEntries(
-      VENDORS.map((vendor) => {
-        const { apiKey, ...rest } = state.settings.providers[vendor]
-        return [vendor, { ...rest, key: state.keys[vendor] }]
-      }),
-    ),
+    keys: state.keys,
     stateFile: state.storage ?? stateFileCandidates()[0],
   })
 
