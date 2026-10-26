@@ -8,7 +8,7 @@ web_search ─┐                          ┌─ tavily
 web_fetch  ─┘   （本插件负责转换）        └─ exa / firecrawl
 ```
 
-- **输入归一**：通用层只有每次查询条数与域名白/黑名单（三家都认）；检索深度、合成答案这类只有某家能做的，留在各自的 provider 卡片里。每个 adapter 负责翻译，做不到的一律**以 notice 告知模型**。
+- **输入归一**：通用层只剩域名白/黑名单；每次查询固定 5 条；检索深度、合成答案这类只有某家能做的，留在各自的 provider 卡片里。做不到的一律**以 notice 告知模型**。
 - **输出归一**：一个 source 形状、一种日期格式、一套错误码；厂商的 `author`/`warnings`/`failed_results` 都折进同一处。
 
 ## 安装
@@ -24,18 +24,15 @@ dsh plugin --profile web add github:nhhc-lxr/dsh-web-tool-provider
 ```text
 ┌ API 密钥 ──────────────────────────┐   三家各一行，存进凭据库
 ├ [搜索 web_search] [抓取 web_fetch] ┤   两个 tab，互不干扰
-│  通用参数                          │   条数 / 黑白域名
+│  通用参数                          │   黑白域名
 │  Tavily   Exa   Firecrawl          │   各自一张卡：接口地址、超时、正文上限、
 └────────────────────────────────────┘   深度 + 该家在该 tab 下的特色项
 ```
 
-- 每个 tab 顶部是「通用参数」，**只放三家都认的东西**：每次查询条数、域名白/黑名单。
-- 条数按 **5 的倍数**取值（5/10/…/100，默认 5），YAML 里写别的数会被就近取整到 5 的倍数。
+- 每个 tab 顶部是「通用参数」，只放三家都认的东西：域名白/黑名单。每次查询固定要 **5 条**（写死，不提供设置）。
 - 检索深度不进通用层：Tavily 只有 `basic`/`advanced`、Exa 只有 `lite`/`auto`/`deep`、Firecrawl 没有——三家档位数量都不同，合成一个旋钮只会得到假通用。深度放在各自卡片里。
 - 每张 provider 卡片有自己的接口地址、超时、正文上限、深度，以及该家独有的项（Tavily 的 `topic`/**`answer`**、Exa 的 `searchType`、Firecrawl 的 `version`/`mainContent`/`maxAge`）。
 - 卡片右上角是「使用中」标记；点「设为该工具后端」即切换，下一次调用生效。
-- 条数受厂商上限约束（Tavily 20/次，Exa 与 Firecrawl 100/次）：超出时按上限发请求，并在结果里附一条 notice。
-- 实际返回条数还受 `dsh-tool-web` 的 `searchMaxResults`（默认 8）限制：想真的拿到 10/15 条，那个值也要一起调大。
 
 密钥解析顺序：插件配置里的字面量 → 凭据库 → 环境变量（`TAVILY_API_KEY` / `EXA_API_KEY` / `FIRECRAWL_API_KEY`），每次调用重新解析。**字面量密钥不会被写进状态文件。**
 
@@ -43,7 +40,7 @@ dsh plugin --profile web add github:nhhc-lxr/dsh-web-tool-provider
 
 | 层 | 字段 |
 |---|---|
-| `search` | `backend`、`maxResults`、`includeDomains`、`excludeDomains` |
+| `search` | `backend`、`includeDomains`、`excludeDomains` |
 | `fetch` | `backend`、`fallbackToHttp` |
 | `providers.tavily` | `baseURL`、`timeoutMs`、`maxChars`、`topic`、`searchDepth`、`answer`、`apiKey`、`apiKeyEnv` |
 | `providers.exa` | `baseURL`、`timeoutMs`、`maxChars`、`searchType`、`apiKey`、`apiKeyEnv` |

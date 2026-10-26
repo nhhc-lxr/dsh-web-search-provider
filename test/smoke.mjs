@@ -202,34 +202,13 @@ await check('the same shared options reach firecrawl as ITS parameters', async (
 
 /* ------------------------------------------------------ degrade + strict -- */
 
-await check('results per query default to five and snap to five', async () => {
-  const cases = [
-    [undefined, 5],
-    [3, 5],
-    [7, 5],
-    [8, 10],
-    [12, 10],
-    [45, 45],
-    [1000, 100],
-  ]
-  for (const [input, expected] of cases) {
-    const { route } = harness(input === undefined ? {} : { searchMaxResults: input })
-    const { payload } = await call(route, {})
-    assert.equal(payload.search.options.maxResults, expected, `input ${input}`)
-  }
-  const { route } = harness({})
-  const out = await call(route, { method: 'POST', body: { search: { options: { maxResults: 17 } } } })
-  assert.equal(out.payload.search.options.maxResults, 15)
-})
-
-await check('a vendor result cap is applied and reported', async () => {
+await check('results per query are fixed at five', async () => {
   stubFetch(() => json(TAVILY))
-  const { registry, route } = harness({ ...KEYS, searchMaxResults: 50 })
-  await call(route, { method: 'POST', body: {} })
-  const out = await registry.search.search({ query: 'q' })
-  assert.equal(calls[0].body.max_results, 20)
-  assert.match(out.content, /tavily caps results at 20 per query/)
-  assert.equal(out.sources.length, 1)
+  const { registry } = harness(KEYS)
+  await registry.search.search({ query: 'q', maxResults: 50 })
+  assert.equal(calls[0].body.max_results, 5)
+  await registry.search.search({ query: 'q', maxResults: 2 })
+  assert.equal(calls.at(-1).body.max_results, 2)
 })
 
 await check('the synthesized answer is a tavily setting, not a shared one', async () => {
@@ -325,7 +304,6 @@ await check('GET exposes the layered shape', async () => {
   const { route } = harness({ searchMaxResults: 9 })
   const { payload } = await call(route, {})
   assert.equal(payload.search.backend, 'tavily')
-  assert.equal(payload.search.options.maxResults, 10)
   assert.equal(payload.search.options.depth, undefined)
   assert.equal(payload.fetch.backend, 'firecrawl')
   assert.equal(payload.fetch.options.fallbackToHttp, true)
@@ -342,7 +320,7 @@ await check('POST persists settings per layer and a restart picks them up', asyn
   const out = await call(route, {
     method: 'POST',
     body: {
-      search: { backend: 'exa', options: { maxResults: 15, includeDomains: ['a.com', 'b.com'] } },
+      search: { backend: 'exa', options: { includeDomains: ['a.com', 'b.com'] } },
       providers: { firecrawl: { maxAge: 60000, version: 'v1' } },
     },
   })
@@ -355,7 +333,6 @@ await check('POST persists settings per layer and a restart picks them up', asyn
   const restarted = harness({})
   const snapshot = await call(restarted.route, {})
   assert.equal(snapshot.payload.search.backend, 'exa')
-  assert.equal(snapshot.payload.search.options.maxResults, 15)
   assert.deepEqual(snapshot.payload.search.options.includeDomains, ['a.com', 'b.com'])
   assert.equal(snapshot.payload.providers.firecrawl.maxAge, 60000)
 })

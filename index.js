@@ -41,9 +41,8 @@ const MAX_TIMER_MS = 2147483647
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
 const BODY_LIMIT_BYTES = 64 * 1024
 const SNIPPET_CHARS = 400
-const RESULT_STEP = 5
-const RESULT_DEFAULT = 5
-const RESULT_MAX = 100
+/** Results asked of every backend, per query. Fixed on purpose: no setting. */
+const RESULTS_PER_QUERY = 5
 
 export const name = PLUGIN
 export const inject = ['web', 'webServer']
@@ -122,10 +121,10 @@ function isHttpUrl(value) {
   }
 }
 
-/** Results per query are always a multiple of five, 5..100. */
-function quantizeResults(value, fallback = RESULT_DEFAULT) {
-  const stepped = Math.round(asNumber(value, fallback, RESULT_STEP, RESULT_MAX) / RESULT_STEP) * RESULT_STEP
-  return Math.min(RESULT_MAX, Math.max(RESULT_STEP, stepped))
+/** Results per query are fixed at five; a caller asking for fewer still wins. */
+function perQueryResults(request) {
+  const asked = Number.isFinite(request?.maxResults) ? Math.round(request.maxResults) : RESULTS_PER_QUERY
+  return Math.max(1, Math.min(RESULTS_PER_QUERY, asked))
 }
 
 function domainList(value) {  const parts = Array.isArray(value) ? value : text(value).split(/[\s,]+/)
@@ -145,7 +144,6 @@ function defaultsFromConfig(config) {
     search: {
       backend: oneOf(config.searchBackend, VENDORS, 'tavily'),
       options: {
-        maxResults: quantizeResults(config.searchMaxResults),
         includeDomains: domainList(config.includeDomains),
         excludeDomains: domainList(config.excludeDomains),
       },
@@ -210,7 +208,6 @@ function mergeSettings(base, patch) {
   if (patch.search?.options && typeof patch.search.options === 'object') {
     const incoming = patch.search.options
     const target = next.search.options
-    if (incoming.maxResults !== undefined) target.maxResults = quantizeResults(incoming.maxResults, target.maxResults)
     if (incoming.includeDomains !== undefined) target.includeDomains = domainList(incoming.includeDomains)
     if (incoming.excludeDomains !== undefined) target.excludeDomains = domainList(incoming.excludeDomains)
   }
@@ -467,15 +464,6 @@ function composeAnswer(answer, notices) {
   return blocks.length === 0 ? undefined : blocks.join('\n\n')
 }
 
-/** A vendor caps results per query; ask for what it can give and say so. */
-function clampResults(request, cap, vendor, notices, vendorCap) {
-  const requested = Number.isFinite(request?.maxResults) ? Math.round(request.maxResults) : cap
-  const wanted = Math.max(1, Math.min(cap, requested))
-  const effective = Math.min(wanted, vendorCap)
-  if (effective < wanted) notices.push(`${vendor} caps results at ${vendorCap} per query`)
-  return effective
-}
-
 /* ---------------------------------------------------------------- adapters -- */
 
 async function tavilySearch(ctx, settings, request, signal, notices) {
@@ -484,7 +472,7 @@ async function tavilySearch(ctx, settings, request, signal, notices) {
   const apiKey = await requireKey(ctx, 'tavily', provider)
   const body = {
     query: text(request?.query),
-    max_results: clampResults(request, options.maxResults, 'tavily', notices, 20),
+    max_results: perQueryResults(request),
     search_depth: provider.searchDepth,
     topic: provider.topic,
   }
@@ -509,7 +497,7 @@ async function exaSearch(ctx, settings, request, signal, notices) {
   const body = {
     query: text(request?.query),
     type: provider.searchType,
-    numResults: clampResults(request, options.maxResults, 'exa', notices, 100),
+    numResults: perQueryResults(request),
     contents: { highlights: true },
   }
   if (options.includeDomains.length > 0) body.includeDomains = options.includeDomains
@@ -531,7 +519,7 @@ async function firecrawlSearch(ctx, settings, request, signal, notices) {
   const apiKey = await requireKey(ctx, 'firecrawl', provider)
   const body = {
     query: text(request?.query),
-    limit: clampResults(request, options.maxResults, 'firecrawl', notices, 100),
+    limit: perQueryResults(request),
     sources: ['web'],
   }
   if (options.includeDomains.length > 0) body.includeDomains = options.includeDomains

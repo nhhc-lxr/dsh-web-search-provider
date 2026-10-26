@@ -6,7 +6,6 @@ window.__ModuleLoader__.load({
 
     const ENDPOINT = '/web-tool-provider/state'
     const VENDORS = ['tavily', 'exa', 'firecrawl']
-    const STEPS = Array.from({ length: 20 }, (_, index) => (index + 1) * 5)
     const TOPICS = ['general', 'news', 'finance']
     const TYPES = ['auto', 'lite', 'deep']
     const VERSIONS = ['v2', 'v1']
@@ -34,7 +33,6 @@ window.__ModuleLoader__.load({
         fromConfig: 'from plugin config',
         missing: 'not configured',
         partial: 'partial',
-        maxResults: 'Results per query',
         includeDomains: 'Only these domains',
         excludeDomains: 'Exclude these domains',
         answer: 'Return a synthesized answer',
@@ -88,7 +86,6 @@ window.__ModuleLoader__.load({
         fromConfig: '来自插件配置',
         missing: '未配置',
         partial: '部分支持',
-        maxResults: '每次查询条数',
         includeDomains: '只搜这些域名',
         excludeDomains: '排除这些域名',
         answer: '返回合成答案',
@@ -385,15 +382,6 @@ window.__ModuleLoader__.load({
         'div',
         { style: styles.card },
         h('h3', { style: styles.cardTitle }, t('common')),
-        selectRow(
-          t('maxResults'),
-          String(state.search.options.maxResults),
-          STEPS.map((value) => String(value)),
-          (value) =>
-            edit((next) => {
-              next.search.options.maxResults = Number(value)
-            }),
-        ),
         textRow(
           t('includeDomains'),
           joinDomains(state.search.options.includeDomains),
