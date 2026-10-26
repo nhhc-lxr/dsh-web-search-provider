@@ -31,6 +31,11 @@ window.__ModuleLoader__.load({
         loading: 'Loading…',
         loadFailed: 'Could not read the plugin state: ',
         keyPlaceholder: 'Paste the key',
+        creditsLoading: 'checking…',
+        creditsLeft: 'left',
+        creditsUsed: 'used',
+        creditsFailed: 'quota lookup failed',
+        creditsUnsupported: 'no quota API',
       },
       zh: {
         tab: '网页工具',
@@ -53,6 +58,11 @@ window.__ModuleLoader__.load({
         loading: '加载中…',
         loadFailed: '读取插件状态失败：',
         keyPlaceholder: '粘贴密钥',
+        creditsLoading: '查询中…',
+        creditsLeft: '剩余',
+        creditsUsed: '已用',
+        creditsFailed: '额度查询失败',
+        creditsUnsupported: '无额度接口',
       },
     }
 
@@ -144,6 +154,7 @@ window.__ModuleLoader__.load({
         cursor: 'pointer',
       },
       vendor: { fontSize: 12, fontWeight: 600, minWidth: 76 },
+      credits: { fontSize: 11, whiteSpace: 'nowrap', color: 'var(--dsw-alias-label-secondary)' },
       badge: {
         fontSize: 11,
         padding: '2px 7px',
@@ -213,6 +224,18 @@ window.__ModuleLoader__.load({
     }
 
     const clone = (value) => JSON.parse(JSON.stringify(value))
+    const formatNumber = (value) => String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+
+    function creditsText(t, entry) {
+      if (!entry || entry.status === 'loading') return t('creditsLoading')
+      if (entry.status === 'error') return t('creditsFailed')
+      if (entry.supported === false) return t('creditsUnsupported')
+      if (entry.remaining !== undefined && entry.limit !== undefined) {
+        return `${t('creditsLeft')} ${formatNumber(entry.remaining)} / ${formatNumber(entry.limit)}`
+      }
+      if (entry.used !== undefined) return `${t('creditsUsed')} ${formatNumber(entry.used)}`
+      return '—'
+    }
     const splitDomains = (value) =>
       String(value)
         .split(/[\s,]+/)
@@ -240,6 +263,7 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = React.useState('')
       const [draftKeys, setDraftKeys] = React.useState({})
       const [editingKeys, setEditingKeys] = React.useState({})
+      const [credits, setCredits] = React.useState({})
       const t = React.useMemo(() => createTranslate({ get: () => undefined }), [])
 
       const stateRef = React.useRef(null)
@@ -266,6 +290,22 @@ window.__ModuleLoader__.load({
         },
         [],
       )
+
+      const loadCredits = React.useCallback(async (vendor) => {
+        setCredits((current) => ({ ...current, [vendor]: { status: 'loading' } }))
+        try {
+          const response = await fetch(`${ENDPOINT.replace('/state', '/credits')}?vendor=${vendor}`, {
+            headers: { accept: 'application/json' },
+          })
+          const payload = await response.json().catch(() => ({}))
+          setCredits((current) => ({
+            ...current,
+            [vendor]: response.ok ? { status: 'ok', ...payload } : { status: 'error' },
+          }))
+        } catch {
+          setCredits((current) => ({ ...current, [vendor]: { status: 'error' } }))
+        }
+      }, [])
 
       /** Auto-save: keep local edits, only refresh the fields the host owns. */
       const commit = React.useCallback(
@@ -418,7 +458,10 @@ window.__ModuleLoader__.load({
           }
         } else {
           actions.push(
-            iconButton('edit', t('edit'), () => setEditingKeys((current) => ({ ...current, [vendor]: true }))),
+            iconButton('edit', t('edit'), () => {
+              setEditingKeys((current) => ({ ...current, [vendor]: true }))
+              loadCredits(vendor)
+            }),
             iconButton('trash', t('clear'), () => applyKeys({ clearKey: { vendor } }, 'cleared'), {
               color: 'var(--dsw-alias-state-error-primary)',
               disabled: busy,
@@ -431,6 +474,9 @@ window.__ModuleLoader__.load({
           { key: vendor, style: { ...styles.row, flexWrap: 'nowrap', height: 34, marginBottom: 4 } },
           h('span', { style: styles.vendor }, labelOf(vendor)),
           keyBadge(t, key),
+          editing
+            ? h('span', { key: 'credits', style: styles.credits }, creditsText(t, credits[vendor]))
+            : null,
           editing
             ? h('input', {
                 key: 'input',

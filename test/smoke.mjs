@@ -49,12 +49,13 @@ function harness(config = {}, { credentials } = {}) {
     get: (name) => (name === 'credentials' ? credentials : undefined),
   }
   mod.apply(ctx, config)
-  return { registry, routes, route: routes[0] }
+  return { registry, routes, route: routes[0], creditsRoute: routes[1] }
 }
 
-function request({ method = 'GET', origin, body } = {}) {
+function request({ method = 'GET', origin, body, url } = {}) {
   const chunks = body === undefined ? [] : [Buffer.from(JSON.stringify(body))]
   return {
+    url: url ?? '/web-tool-provider/state',
     method,
     headers: origin === undefined ? { host: '127.0.0.1:1' } : { host: '127.0.0.1:1', origin },
     async *[Symbol.asyncIterator]() {
@@ -124,12 +125,13 @@ const TAVILY = {
 
 /* ------------------------------------------------------------ contract -- */
 
-await check('one provider per capability, one state route', async () => {
+await check('one provider per capability, one state route, one credits route', async () => {
   const { registry, routes } = harness()
   assert.equal(registry.search.id, 'web-tool')
   assert.equal(registry.fetch.id, 'web-tool')
-  assert.equal(routes.length, 1)
+  assert.equal(routes.length, 2)
   assert.equal(routes[0].path, '/web-tool-provider/state')
+  assert.equal(routes[1].path, '/web-tool-provider/credits')
 })
 
 await check('every vendor normalizes to the same source shape', async () => {
@@ -363,6 +365,31 @@ await check('keys go through the credential service, never the state file', asyn
   assert.deepEqual(credentials.writes[0], ['set', 'EXA_API_KEY', 'exa-new'])
   await call(route, { method: 'POST', body: { clearKey: { vendor: 'exa' } } })
   assert.deepEqual(credentials.writes[1], ['unset', 'EXA_API_KEY'])
+})
+
+await check('credits: tavily is a limit minus usage, firecrawl is direct, exa is unsupported', async () => {
+  stubFetch((url) => {
+    if (url.includes('/usage')) return json({ key: { usage: 150 }, account: { plan_usage: 500, plan_limit: 15000, current_plan: 'Bootstrap' } })
+    if (url.includes('/team/credit-usage')) return json({ success: true, data: { remainingCredits: 42000, planCredits: 500000 } })
+    throw new Error(`unexpected credits URL ${url}`)
+  })
+  const { creditsRoute } = harness(KEYS)
+
+  const tavily = await call(creditsRoute, { url: '/web-tool-provider/credits?vendor=tavily' })
+  assert.equal(tavily.status, 200)
+  assert.equal(tavily.payload.remaining, 14500)
+  assert.equal(tavily.payload.limit, 15000)
+
+  const firecrawl = await call(creditsRoute, { url: '/web-tool-provider/credits?vendor=firecrawl' })
+  assert.equal(firecrawl.payload.remaining, 42000)
+
+  const before = calls.length
+  const exa = await call(creditsRoute, { url: '/web-tool-provider/credits?vendor=exa' })
+  assert.equal(exa.payload.supported, false)
+  assert.equal(calls.length, before, 'exa must not reach the network')
+
+  const bogus = await call(creditsRoute, { url: '/web-tool-provider/credits?vendor=nope' })
+  assert.equal(bogus.status, 400)
 })
 
 await check('the state route refuses a foreign origin', async () => {

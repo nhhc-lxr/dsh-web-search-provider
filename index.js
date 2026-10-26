@@ -30,6 +30,7 @@ import { dirname, join } from 'node:path'
 
 const PLUGIN = 'web-tool-provider'
 const ROUTE = '/web-tool-provider/state'
+const CREDITS_ROUTE = '/web-tool-provider/credits'
 const PROVIDER_ID = 'web-tool'
 const VENDORS = ['tavily', 'exa', 'firecrawl']
 const CREDENTIAL_REF = {
@@ -376,6 +377,67 @@ async function postJson(url, body, { headers, timeoutMs, signal, label, vendor }
       throw providerError(`${vendor} returned a non-JSON response`, 'WEB_PROVIDER_UPSTREAM')
     }
   })
+}
+
+async function getJson(url, { headers, timeoutMs, signal, label, vendor }) {
+  return withDeadline(signal, timeoutMs, label, async (inner) => {
+    const response = await fetch(url, { method: 'GET', headers: { accept: 'application/json', ...headers }, signal: inner })
+    const raw = await response.text()
+    if (!response.ok) throw classifyFailure(vendor, response.status, raw)
+    try {
+      return JSON.parse(raw)
+    } catch {
+      throw providerError(`${vendor} returned a non-JSON response`, 'WEB_PROVIDER_UPSTREAM')
+    }
+  })
+}
+
+/**
+ * Remaining balance per vendor. Tavily reports usage against a limit, Firecrawl
+ * reports the remaining credits directly, Exa has no balance endpoint at all.
+ */
+async function fetchCredits(ctx, settings, vendor) {
+  if (vendor === 'exa') return { supported: false, reason: 'exa has no balance endpoint' }
+  const provider = settings.providers[vendor]
+  const apiKey = await requireKey(ctx, vendor, provider)
+
+  if (vendor === 'tavily') {
+    const payload = await getJson(`${provider.baseURL}/usage`, {
+      headers: { authorization: `Bearer ${apiKey}` },
+      timeoutMs: provider.timeoutMs,
+      label: 'tavily usage',
+      vendor: 'tavily',
+    })
+    const keyUsage = payload?.key ?? {}
+    const account = payload?.account ?? {}
+    const limit = Number.isFinite(account.plan_limit) ? account.plan_limit : Number.isFinite(keyUsage.limit) ? keyUsage.limit : undefined
+    const used = Number.isFinite(account.plan_usage) ? account.plan_usage : Number.isFinite(keyUsage.usage) ? keyUsage.usage : undefined
+    return {
+      supported: true,
+      plan: text(account.current_plan) || undefined,
+      used,
+      limit,
+      remaining: limit !== undefined && used !== undefined ? Math.max(0, limit - used) : undefined,
+    }
+  }
+
+  const payload = await getJson(`${provider.baseURL}/${provider.version}/team/credit-usage`, {
+    headers: { authorization: `Bearer ${apiKey}` },
+    timeoutMs: provider.timeoutMs,
+    label: 'firecrawl credit usage',
+    vendor: 'firecrawl',
+  })
+  if (payload?.success === false) {
+    throw providerError(`firecrawl credit usage failed: ${clip(payload?.error ?? 'unknown error', 200)}`, 'WEB_PROVIDER_UPSTREAM')
+  }
+  const data = payload?.data ?? {}
+  return {
+    supported: true,
+    used: Number.isFinite(data.planCredits) && Number.isFinite(data.remainingCredits) ? data.planCredits - data.remainingCredits : undefined,
+    limit: Number.isFinite(data.planCredits) ? data.planCredits : undefined,
+    remaining: Number.isFinite(data.remainingCredits) ? data.remainingCredits : undefined,
+    periodEnd: text(data.billingPeriodEnd) || undefined,
+  }
 }
 
 function normalizeSource(raw) {
@@ -901,6 +963,30 @@ function createStateRoutes(ctx, state) {
   return ctx.webServer.register({ kind: 'exact', path: ROUTE, handler })
 }
 
+function createCreditsRoutes(ctx, state) {
+  const handler = async (req, res) => {
+    if (!sameOrigin(req)) {
+      sendJson(res, 403, { error: 'forbidden' })
+      return
+    }
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      sendJson(res, 405, { error: 'method-not-allowed' })
+      return
+    }
+    const vendor = oneOf(new URL(req.url ?? '/', 'http://localhost').searchParams.get('vendor'), VENDORS, '')
+    if (vendor === '') {
+      sendJson(res, 400, { error: 'vendor is required' })
+      return
+    }
+    try {
+      sendJson(res, 200, { vendor, ...(await fetchCredits(ctx, state.settings, vendor)) })
+    } catch (error) {
+      sendJson(res, 502, { vendor, error: error?.message ?? String(error), code: error?.code })
+    }
+  }
+  return ctx.webServer.register({ kind: 'exact', path: CREDITS_ROUTE, handler })
+}
+
 export function apply(ctx, config) {
   const { settings, storage } = loadSettings(config)
   const state = { settings, storage, keys: {} }
@@ -908,6 +994,7 @@ export function apply(ctx, config) {
   ctx.web.registerFetchProvider(createFetchProvider(ctx, state))
   try {
     createStateRoutes(ctx, state)
+    createCreditsRoutes(ctx, state)
   } catch (error) {
     // A route already registered for this path means the previous fiber has not
     // disposed yet. Losing the settings page is survivable; losing the web

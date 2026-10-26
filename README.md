@@ -33,7 +33,15 @@ dsh plugin --profile web add github:nhhc-lxr/dsh-web-tool-provider
 └──────────────────────────────────┘
 ```
 
-没有保存按钮：两个下拉**改动即存**。密钥显式保存（避免输一半就被写进凭据库）：已配置的行隐藏输入框，点铅笔才展开。
+没有保存按钮：两个下拉**改动即存**。密钥显式保存（避免输一半就被写进凭据库）：已配置的行隐藏输入框，点铅笔才展开，同时在输入框左边显示剩余额度。
+
+额度查询直连厂商接口（不经 `ctx.web`、不经工具层）：
+
+| 厂商 | 接口 | 剩余额度 |
+|---|---|---|
+| Tavily | `GET /usage` | `account.plan_limit - plan_usage`（`limit` 为 `null` 表示不限） |
+| Firecrawl | `GET /v2/team/credit-usage` | 直接给 `remainingCredits` |
+| Exa | — | 无余额接口（要 service key + 团队开通，且只给美元消费额），页面显示「无额度接口」 |
 
 密钥解析顺序：插件配置里的字面量 → 凭据库 → 环境变量（`TAVILY_API_KEY` / `EXA_API_KEY` / `FIRECRAWL_API_KEY`），每次调用重新解析。**字面量密钥不会被写进状态文件。**
 
