@@ -160,8 +160,8 @@ window.__ModuleLoader__.load({
         whiteSpace: 'nowrap',
       },
       iconButton: {
-        height: 28,
-        width: 28,
+        height: 30,
+        width: 30,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -478,40 +478,23 @@ window.__ModuleLoader__.load({
         const draft = draftKeys[vendor] === undefined ? '' : draftKeys[vendor]
         const configured = Boolean(key.configured)
         const editing = editingKeys[vendor] === true || !configured
-        const controls = []
+        const actions = []
 
         if (editing) {
-          controls.push(
-            h('input', {
-              key: 'input',
-              style: styles.input,
-              type: 'password',
-              autoComplete: 'off',
-              spellCheck: false,
-              placeholder: `${t('keyPlaceholder')} (${key.ref || vendor})`,
-              value: draft,
-              disabled: busy,
-              onChange: (event) => setDraftKeys({ ...draftKeys, [vendor]: event.target.value }),
+          actions.push(
+            iconButton('check', t('save'), () => applyKeys({ setKey: { vendor, value: draft.trim() } }, 'saved'), {
+              color: 'var(--dsw-alias-brand-primary)',
+              disabled: busy || draft.trim() === '',
             }),
-            iconButton(
-              'check',
-              t('save'),
-              () => applyKeys({ setKey: { vendor, value: draft.trim() } }, 'saved'),
-              { color: 'var(--dsw-alias-brand-primary)', disabled: busy || draft.trim() === '' },
-            ),
           )
           if (configured) {
-            controls.push(
-              iconButton('close', t('cancel'), () =>
-                setEditingKeys((current) => ({ ...current, [vendor]: false })),
-              ),
+            actions.push(
+              iconButton('close', t('cancel'), () => setEditingKeys((current) => ({ ...current, [vendor]: false }))),
             )
           }
         } else {
-          controls.push(
-            iconButton('edit', t('edit'), () =>
-              setEditingKeys((current) => ({ ...current, [vendor]: true })),
-            ),
+          actions.push(
+            iconButton('edit', t('edit'), () => setEditingKeys((current) => ({ ...current, [vendor]: true }))),
             iconButton('trash', t('clear'), () => applyKeys({ clearKey: { vendor } }, 'cleared'), {
               color: 'var(--dsw-alias-state-error-primary)',
               disabled: busy,
@@ -521,10 +504,27 @@ window.__ModuleLoader__.load({
 
         return h(
           'div',
-          { key: vendor, style: styles.row },
+          { key: vendor, style: { ...styles.row, flexWrap: 'nowrap', minHeight: 30, marginBottom: 8 } },
           h('span', { style: styles.vendor }, labelOf(vendor)),
           keyBadge(t, key),
-          ...controls,
+          editing
+            ? h('input', {
+                key: 'input',
+                style: { ...styles.input, flex: '1 1 160px', minWidth: 130 },
+                type: 'password',
+                autoComplete: 'off',
+                spellCheck: false,
+                placeholder: `${t('keyPlaceholder')} (${key.ref || vendor})`,
+                value: draft,
+                disabled: busy,
+                onChange: (event) => setDraftKeys({ ...draftKeys, [vendor]: event.target.value }),
+              })
+            : null,
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto', flex: '0 0 auto' } },
+            ...actions,
+          ),
         )
       })
 
