@@ -24,8 +24,8 @@ dsh plugin --profile web add github:nhhc-lxr/dsh-web-tool-provider
 
 ```text
 ┌ 后端选择 ─────────────────────────┐
-│ 搜索 web_search   [ Tavily   ▾ ]  │
-│ 抓取 web_fetch    [ Firecrawl ▾ ] │
+│ web_search   [ Tavily    ▾ ]      │
+│ web_fetch    [ Firecrawl ▾ ]      │
 ├ 通用选项 ─────────────────────────┤
 │ 只搜这些域名   [ a.com, b.com   ]  │
 │ 排除这些域名   [ ...            ]  │
@@ -35,8 +35,9 @@ dsh plugin --profile web add github:nhhc-lxr/dsh-web-tool-provider
 │ Exa        [未配置] [____] 保存 清除│
 │ Firecrawl  [已配置] [____] 保存 清除│
 └──────────────────────────────────┘
-                                  [保存]
 ```
+
+没有保存按钮：下拉框与勾选框**改动即存**，域名输入框**停止输入 600ms 后自动保存**。密钥仍需手动点「保存」，避免输一半就被写进凭据库。
 
 密钥解析顺序：插件配置里的字面量 → 凭据库 → 环境变量（`TAVILY_API_KEY` / `EXA_API_KEY` / `FIRECRAWL_API_KEY`），每次调用重新解析。**字面量密钥不会被写进状态文件。**
 

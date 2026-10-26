@@ -8,13 +8,12 @@ window.__ModuleLoader__.load({
     const VENDORS = ['tavily', 'exa', 'firecrawl']
     const LABELS = { tavily: 'Tavily', exa: 'Exa', firecrawl: 'Firecrawl' }
     const labelOf = (vendor) => LABELS[vendor] || vendor
+    const DEBOUNCE_MS = 600
 
     const DICT = {
       en: {
         tab: 'Web tools',
         title: 'Web tool provider',
-        subtitle:
-          'Pick one backend for each tool. Keys live in the harness credential store; every other vendor parameter is handled by the plugin.',
         backends: 'Backends',
         searchBackend: 'web_search',
         fetchBackend: 'web_fetch',
@@ -36,15 +35,13 @@ window.__ModuleLoader__.load({
         loadFailed: 'Could not read the plugin state: ',
         keyPlaceholder: 'Paste the key',
         domainsPlaceholder: 'a.com, b.com',
-        perCall: 'Applies to the next call — no restart needed.',
       },
       zh: {
         tab: '网页工具',
         title: '网页工具后端',
-        subtitle: '给两个工具各选一个后端。密钥存在 Harness 凭据库里，其余厂商参数由插件负责。',
         backends: '后端选择',
-        searchBackend: '搜索 web_search',
-        fetchBackend: '抓取 web_fetch',
+        searchBackend: 'web_search',
+        fetchBackend: 'web_fetch',
         options: '通用选项',
         includeDomains: '只搜这些域名',
         excludeDomains: '排除这些域名',
@@ -63,7 +60,6 @@ window.__ModuleLoader__.load({
         loadFailed: '读取插件状态失败：',
         keyPlaceholder: '粘贴密钥',
         domainsPlaceholder: 'a.com, b.com',
-        perCall: '下一次调用即生效，不用重启。',
       },
     }
 
@@ -98,8 +94,7 @@ window.__ModuleLoader__.load({
 
     const styles = {
       page: { padding: '4px 0 24px', maxWidth: 640, color: 'var(--dsw-alias-label-primary)' },
-      title: { margin: '0 0 6px', fontSize: 15, fontWeight: 600 },
-      subtitle: { margin: '0 0 16px', fontSize: 12, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)' },
+      title: { margin: '0 0 14px', fontSize: 15, fontWeight: 600 },
       card: {
         border: '1px solid var(--dsw-alias-border-l1)',
         borderRadius: 10,
@@ -182,6 +177,7 @@ window.__ModuleLoader__.load({
       return payload
     }
 
+    const clone = (value) => JSON.parse(JSON.stringify(value))
     const joinDomains = (value) => (Array.isArray(value) ? value.join(', ') : '')
     const splitDomains = (value) =>
       String(value)
@@ -209,11 +205,17 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       const [notice, setNotice] = React.useState('')
       const [draftKeys, setDraftKeys] = React.useState({})
+      const [draftDomains, setDraftDomains] = React.useState({ include: null, exclude: null })
       const t = React.useMemo(() => createTranslate({ get: () => undefined }), [])
+
+      const stateRef = React.useRef(null)
+      const timerRef = React.useRef(null)
 
       const refresh = React.useCallback(async () => {
         try {
-          setState(await readState())
+          const payload = await readState()
+          stateRef.current = payload
+          setState(payload)
           setError('')
         } catch (cause) {
           setError(String(cause && cause.message ? cause.message : cause))
@@ -224,22 +226,75 @@ window.__ModuleLoader__.load({
         refresh()
       }, [refresh])
 
-      const apply = React.useCallback(
+      React.useEffect(
+        () => () => {
+          if (timerRef.current !== null) clearTimeout(timerRef.current)
+        },
+        [],
+      )
+
+      /** Auto-save: keep local edits, only refresh the fields the host owns. */
+      const commit = React.useCallback(
+        async (body) => {
+          try {
+            const payload = await writeState(body)
+            setError('')
+            setDraftDomains({ include: null, exclude: null })
+            setState((current) =>
+              current
+                ? { ...current, keys: payload.keys || current.keys, stateFile: payload.stateFile || current.stateFile }
+                : current,
+            )
+            if (payload.persistence && payload.persistence.persisted === false) {
+              setNotice(`${t('localOnly')}${payload.persistence.reason || ''}`)
+            } else {
+              setNotice(t('saved'))
+            }
+          } catch (cause) {
+            setError(String(cause && cause.message ? cause.message : cause))
+          }
+        },
+        [t],
+      )
+
+      const snapshotBody = (current) => ({
+        search: { backend: current.search.backend, options: current.search.options },
+        fetch: { backend: current.fetch.backend, options: current.fetch.options },
+      })
+
+      const edit = (mutate) => {
+        const next = clone(stateRef.current)
+        mutate(next)
+        stateRef.current = next
+        setState(next)
+        return next
+      }
+
+      const saveNow = (next) => commit(snapshotBody(next))
+
+      const scheduleSave = () => {
+        if (timerRef.current !== null) clearTimeout(timerRef.current)
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null
+          if (stateRef.current) commit(snapshotBody(stateRef.current))
+        }, DEBOUNCE_MS)
+      }
+
+      const applyKeys = React.useCallback(
         async (body, kind) => {
           setBusy(true)
           setNotice('')
           try {
             const payload = await writeState(body)
+            stateRef.current = payload
             setState(payload)
             setError('')
-            if (payload && payload.persistence && payload.persistence.persisted === false) {
+            if (payload.persistence && payload.persistence.persisted === false) {
               setNotice(`${t('localOnly')}${payload.persistence.reason || ''}`)
             } else {
               setNotice(t(kind))
             }
-            if (kind === 'saved' && body.setKey) {
-              setDraftKeys((current) => ({ ...current, [body.setKey.vendor]: '' }))
-            }
+            if (body.setKey) setDraftKeys((current) => ({ ...current, [body.setKey.vendor]: '' }))
           } catch (cause) {
             setError(String(cause && cause.message ? cause.message : cause))
           } finally {
@@ -250,16 +305,10 @@ window.__ModuleLoader__.load({
       )
 
       if (state === null && error === '') {
-        return h('div', { style: styles.page }, h('p', { style: styles.subtitle }, t('loading')))
+        return h('div', { style: styles.page }, h('p', { style: styles.note }, t('loading')))
       }
       if (state === null) {
         return h('div', { style: styles.page }, h('p', { style: styles.error }, `${t('loadFailed')}${error}`))
-      }
-
-      const edit = (mutate) => {
-        const next = JSON.parse(JSON.stringify(state))
-        mutate(next)
-        setState(next)
       }
 
       const optionTag = (value) => h('option', { key: value, value }, labelOf(value))
@@ -277,11 +326,12 @@ window.__ModuleLoader__.load({
             {
               style: styles.select,
               value: state.search.backend,
-              disabled: busy,
               onChange: (event) =>
-                edit((next) => {
-                  next.search.backend = event.target.value
-                }),
+                saveNow(
+                  edit((next) => {
+                    next.search.backend = event.target.value
+                  }),
+                ),
             },
             VENDORS.map(optionTag),
           ),
@@ -295,11 +345,12 @@ window.__ModuleLoader__.load({
             {
               style: styles.select,
               value: state.fetch.backend,
-              disabled: busy,
               onChange: (event) =>
-                edit((next) => {
-                  next.fetch.backend = event.target.value
-                }),
+                saveNow(
+                  edit((next) => {
+                    next.fetch.backend = event.target.value
+                  }),
+                ),
             },
             VENDORS.map(optionTag),
           ),
@@ -318,12 +369,14 @@ window.__ModuleLoader__.load({
             style: styles.input,
             type: 'text',
             placeholder: t('domainsPlaceholder'),
-            value: joinDomains(state.search.options.includeDomains),
-            disabled: busy,
-            onChange: (event) =>
+            value: draftDomains.include === null ? joinDomains(state.search.options.includeDomains) : draftDomains.include,
+            onChange: (event) => {
+              setDraftDomains((current) => ({ ...current, include: event.target.value }))
               edit((next) => {
                 next.search.options.includeDomains = splitDomains(event.target.value)
-              }),
+              })
+              scheduleSave()
+            },
           }),
         ),
         h(
@@ -334,12 +387,14 @@ window.__ModuleLoader__.load({
             style: styles.input,
             type: 'text',
             placeholder: t('domainsPlaceholder'),
-            value: joinDomains(state.search.options.excludeDomains),
-            disabled: busy,
-            onChange: (event) =>
+            value: draftDomains.exclude === null ? joinDomains(state.search.options.excludeDomains) : draftDomains.exclude,
+            onChange: (event) => {
+              setDraftDomains((current) => ({ ...current, exclude: event.target.value }))
               edit((next) => {
                 next.search.options.excludeDomains = splitDomains(event.target.value)
-              }),
+              })
+              scheduleSave()
+            },
           }),
         ),
         h(
@@ -349,11 +404,12 @@ window.__ModuleLoader__.load({
           h('input', {
             type: 'checkbox',
             checked: Boolean(state.fetch.options.fallbackToHttp),
-            disabled: busy,
             onChange: (event) =>
-              edit((next) => {
-                next.fetch.options.fallbackToHttp = event.target.checked
-              }),
+              saveNow(
+                edit((next) => {
+                  next.fetch.options.fallbackToHttp = event.target.checked
+                }),
+              ),
           }),
         ),
       )
@@ -381,7 +437,7 @@ window.__ModuleLoader__.load({
             {
               style: styles.primary,
               disabled: busy || draft.trim() === '',
-              onClick: () => apply({ setKey: { vendor, value: draft.trim() } }, 'saved'),
+              onClick: () => applyKeys({ setKey: { vendor, value: draft.trim() } }, 'saved'),
             },
             t('save'),
           ),
@@ -390,7 +446,7 @@ window.__ModuleLoader__.load({
             {
               style: styles.button,
               disabled: busy,
-              onClick: () => apply({ clearKey: { vendor } }, 'cleared'),
+              onClick: () => applyKeys({ clearKey: { vendor } }, 'cleared'),
             },
             t('clear'),
           ),
@@ -401,43 +457,11 @@ window.__ModuleLoader__.load({
         'div',
         { style: styles.page },
         h('h2', { style: styles.title }, t('title')),
-        h('p', { style: styles.subtitle }, t('subtitle')),
         backends,
         options,
         h('div', { style: styles.card }, h('h3', { style: styles.cardTitle }, t('keys')), keyRows),
-        h(
-          'div',
-          { style: styles.row },
-          h('span', { style: styles.label }, ''),
-          h(
-            'button',
-            {
-              style: styles.primary,
-              disabled: busy,
-              onClick: () =>
-                apply(
-                  {
-                    search: {
-                      backend: state.search.backend,
-                      options: {
-                        includeDomains: state.search.options.includeDomains,
-                        excludeDomains: state.search.options.excludeDomains,
-                      },
-                    },
-                    fetch: {
-                      backend: state.fetch.backend,
-                      options: { fallbackToHttp: state.fetch.options.fallbackToHttp },
-                    },
-                  },
-                  'saved',
-                ),
-            },
-            t('save'),
-          ),
-        ),
         notice === '' ? null : h('p', { style: styles.ok }, notice),
         error === '' ? null : h('p', { style: styles.error }, error),
-        h('p', { style: styles.note }, t('perCall')),
         state.stateFile ? h('p', { style: styles.note }, state.stateFile) : null,
       )
     }
