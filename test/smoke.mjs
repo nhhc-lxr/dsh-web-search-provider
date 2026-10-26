@@ -177,6 +177,7 @@ await check('shared options reach tavily as its own parameters', async () => {
   assert.equal(calls[0].body.topic, 'news')
   assert.equal(calls[0].body.search_depth, 'advanced')
   assert.equal(calls[0].body.include_published_date, true)
+  assert.equal('include_answer' in calls[0].body, false)
   assert.equal(calls[0].body.max_results, 5)
   await call(route, { method: 'POST', body: { providers: { tavily: { searchDepth: 'fast' } } } })
   await registry.search.search({ query: 'q' })
@@ -215,14 +216,18 @@ await check('results per query are fixed at five', async () => {
   assert.equal(calls.at(-1).body.max_results, 2)
 })
 
-await check('the synthesized answer is a tavily setting, not a shared one', async () => {
+await check('no backend is asked for an answer or per-result content', async () => {
   stubFetch(() => json(TAVILY))
-  const { registry, route } = harness(KEYS)
-  await registry.search.search({ query: 'q' })
-  assert.equal(calls[0].body.include_answer, true)
-  await call(route, { method: 'POST', body: { providers: { tavily: { answer: false } } } })
-  await registry.search.search({ query: 'q' })
-  assert.equal('include_answer' in calls.at(-1).body, false)
+  const tavily = harness(KEYS)
+  const out = await tavily.registry.search.search({ query: 'q' })
+  assert.equal('include_answer' in calls[0].body, false)
+  assert.equal(out.content, undefined)
+
+  stubFetch(() => json({ results: [] }))
+  const exa = harness(KEYS)
+  await call(exa.route, { method: 'POST', body: { search: { backend: 'exa' } } })
+  await exa.registry.search.search({ query: 'q' })
+  assert.equal('contents' in calls[0].body, false)
 })
 
 await check('an empty result set is reported to the model', async () => {

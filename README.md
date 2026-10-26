@@ -10,6 +10,7 @@ web_fetch  ─┘   （本插件负责转换）        └─ exa / firecrawl
 
 - **输入归一**：通用层只剩域名白/黑名单；每次查询固定 5 条；检索深度、合成答案这类只有某家能做的，留在各自的 provider 卡片里。做不到的一律**以 notice 告知模型**。
 - **输出归一**：一个 source 形状、一种日期格式、一套错误码；厂商的 `author`/`warnings`/`failed_results` 都折进同一处。
+- **不向厂商索要答案或逐条正文**：Tavily 的 `include_answer` 与 Exa 的 `contents.highlights` 都是关闭的，`content` 只承载降级 notice，正文一律走 `web_fetch`。
 
 ## 安装
 
@@ -31,7 +32,7 @@ dsh plugin --profile web add github:nhhc-lxr/dsh-web-tool-provider
 
 - 每个 tab 顶部是「通用参数」，只放三家都认的东西：域名白/黑名单。每次查询固定要 **5 条**（写死，不提供设置）。
 - 检索深度不进通用层：Tavily 只有 `basic`/`advanced`、Exa 只有 `lite`/`auto`/`deep`、Firecrawl 没有——三家档位数量都不同，合成一个旋钮只会得到假通用。深度放在各自卡片里。
-- 每张 provider 卡片有自己的接口地址、超时、正文上限、深度，以及该家独有的项（Tavily 的 `topic`/**`answer`**、Exa 的 `searchType`、Firecrawl 的 `version`/`mainContent`/`maxAge`）。
+- 每张 provider 卡片有自己的接口地址、超时、正文上限、深度，以及该家独有的项（Tavily 的 `topic`/`searchDepth`、Exa 的 `searchType`、Firecrawl 的 `version`/`mainContent`/`maxAge`）。
 - 卡片右上角是「使用中」标记；点「设为该工具后端」即切换，下一次调用生效。
 
 密钥解析顺序：插件配置里的字面量 → 凭据库 → 环境变量（`TAVILY_API_KEY` / `EXA_API_KEY` / `FIRECRAWL_API_KEY`），每次调用重新解析。**字面量密钥不会被写进状态文件。**
@@ -42,7 +43,7 @@ dsh plugin --profile web add github:nhhc-lxr/dsh-web-tool-provider
 |---|---|
 | `search` | `backend`、`includeDomains`、`excludeDomains` |
 | `fetch` | `backend`、`fallbackToHttp` |
-| `providers.tavily` | `baseURL`、`timeoutMs`、`maxChars`、`topic`、`searchDepth`、`answer`、`apiKey`、`apiKeyEnv` |
+| `providers.tavily` | `baseURL`、`timeoutMs`、`maxChars`、`topic`、`searchDepth`、`apiKey`、`apiKeyEnv` |
 | `providers.exa` | `baseURL`、`timeoutMs`、`maxChars`、`searchType`、`apiKey`、`apiKeyEnv` |
 | `providers.firecrawl` | `baseURL`、`timeoutMs`、`maxChars`、`version`、`mainContent`、`maxAge`、`apiKey`、`apiKeyEnv` |
 
@@ -57,7 +58,7 @@ FetchResult  = { url: string; statusCode: number; body: { kind: 'text' | 'html';
 
 - `snippet` 单行、≤400 字；`author` 以 ` · 作者` 附在末尾；`highlights` 数组拼成一段。
 - `publishedAt` 一律 `YYYY-MM-DD`。
-- `content` = 「厂商答案 + notices」；抓取降级也会附 `> provider notice: fell back ...`。
+- `content` 只装降级 notice（不向厂商要答案）；抓取降级也会附 `> provider notice: fell back ...`。
 - 错误码：`WEB_PROVIDER_UNAUTHORIZED` / `_QUOTA_EXCEEDED` / `_RATE_LIMITED` / `_BAD_REQUEST` / `_UPSTREAM` / `_UNREACHABLE` / `_EMPTY` / `_CREDENTIAL_MISSING`、`WEB_ABORTED`、`WEB_INVALID_URL`、`WEB_BLOCKED_URL`。
 
 ## 行为

@@ -37,7 +37,6 @@ window.__ModuleLoader__.load({
         partial: 'partial',
         includeDomains: 'Only these domains',
         excludeDomains: 'Exclude these domains',
-        answer: 'Return a synthesized answer',
         fallback: 'Fall back to a direct HTTP fetch when the backend fails',
         baseURL: 'API base URL',
         timeoutMs: 'Timeout (ms)',
@@ -90,7 +89,6 @@ window.__ModuleLoader__.load({
         partial: '部分支持',
         includeDomains: '只搜这些域名',
         excludeDomains: '排除这些域名',
-        answer: '返回合成答案',
         fallback: '后端失败时退回直接 HTTP 抓取',
         baseURL: '接口地址',
         timeoutMs: '超时（毫秒）',
@@ -462,26 +460,7 @@ window.__ModuleLoader__.load({
               edit((next) => {
                 next.providers.tavily.searchDepth = value
               }),
-            ),
-            h(
-              'div',
-              { style: styles.row, key: 'answer' },
-              h('span', { style: styles.label }, ''),
-              h(
-                'label',
-                { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 } },
-                h('input', {
-                  type: 'checkbox',
-                  checked: Boolean(provider.answer),
-                  disabled: busy,
-                  onChange: (event) =>
-                    edit((next) => {
-                      next.providers.tavily.answer = event.target.checked
-                    }),
-                }),
-                t('answer'),
-              ),
-            ),
+            )
           )
         }
         if (tab === 'search' && vendor === 'exa') {

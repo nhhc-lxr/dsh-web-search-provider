@@ -161,7 +161,6 @@ function defaultsFromConfig(config) {
         apiKeyEnv: text(config.tavilyApiKeyEnv) || CREDENTIAL_REF.tavily,
         topic: oneOf(config.tavilyTopic, ['general', 'news', 'finance'], 'general'),
         searchDepth: oneOf(config.tavilySearchDepth, ['basic', 'fast', 'advanced'], 'basic'),
-        answer: asBoolean(config.tavilyIncludeAnswer, true),
       },
       exa: {
         baseURL: stripSlash(text(config.exaBaseURL) || 'https://api.exa.ai'),
@@ -239,7 +238,6 @@ function mergeSettings(base, patch) {
         if (incoming.searchDepth !== undefined) {
           target.searchDepth = oneOf(incoming.searchDepth, ['basic', 'fast', 'advanced'], target.searchDepth)
         }
-        if (incoming.answer !== undefined) target.answer = asBoolean(incoming.answer, target.answer)
       }
       if (vendor === 'exa' && incoming.searchType !== undefined) {
         target.searchType = oneOf(incoming.searchType, ['auto', 'lite', 'deep'], target.searchType)
@@ -476,7 +474,6 @@ async function tavilySearch(ctx, settings, request, signal, notices) {
     search_depth: provider.searchDepth,
     topic: provider.topic,
   }
-  if (provider.answer) body.include_answer = true
   // Published dates only come back when asked for (beta, free); topic=news implies it.
   body.include_published_date = true
   if (options.includeDomains.length > 0) body.include_domains = options.includeDomains
@@ -489,7 +486,7 @@ async function tavilySearch(ctx, settings, request, signal, notices) {
     label: 'tavily search',
     vendor: 'tavily',
   })
-  return { answer: flatten(payload?.answer), sources: normalizeSources(payload?.results) }
+  return { answer: '', sources: normalizeSources(payload?.results) }
 }
 
 async function exaSearch(ctx, settings, request, signal, notices) {
@@ -500,7 +497,6 @@ async function exaSearch(ctx, settings, request, signal, notices) {
     query: text(request?.query),
     type: provider.searchType,
     numResults: perQueryResults(request),
-    contents: { highlights: true },
   }
   if (options.includeDomains.length > 0) body.includeDomains = options.includeDomains
   if (options.excludeDomains.length > 0) body.excludeDomains = options.excludeDomains
@@ -512,7 +508,7 @@ async function exaSearch(ctx, settings, request, signal, notices) {
     label: 'exa search',
     vendor: 'exa',
   })
-  return { answer: flatten(payload?.output), sources: normalizeSources(payload?.results) }
+  return { answer: '', sources: normalizeSources(payload?.results) }
 }
 
 async function firecrawlSearch(ctx, settings, request, signal, notices) {
