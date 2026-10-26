@@ -7,9 +7,9 @@
  *
  * Two contracts are normalized here and nowhere else:
  *
- *   INPUT   semantic knobs (recency / domains / locale / depth / answer) instead
- *           of vendor parameters. Each adapter translates what the vendor can
- *           honour and reports what it dropped as a notice, never silently.
+ *   INPUT   semantic knobs (domains / depth / answer) instead of vendor
+ *           parameters. Each adapter translates what the vendor can honour and
+ *           reports what it dropped as a notice, never silently.
  *   OUTPUT  one source shape and one document shape for every vendor, one date
  *           format, one error taxonomy, and vendor warnings folded into the
  *           answer text so the model learns about degradation.
@@ -48,9 +48,7 @@ const MAX_TIMER_MS = 2147483647
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
 const BODY_LIMIT_BYTES = 64 * 1024
 const SNIPPET_CHARS = 400
-const RECENCY_DAYS = { day: 1, week: 7, month: 30, year: 365 }
 const DEPTH_VALUES = ['auto', 'fast', 'balanced', 'deep']
-const RECENCY_VALUES = ['any', 'day', 'week', 'month', 'year']
 
 export const name = PLUGIN
 export const inject = ['web', 'webServer']
@@ -138,10 +136,8 @@ function domainList(value) {
 function normalizeOptions(input) {
   const source = input && typeof input === 'object' ? input : {}
   return {
-    recency: oneOf(source.recency, RECENCY_VALUES, 'any'),
     depth: oneOf(source.depth, DEPTH_VALUES, 'auto'),
     answer: oneOf(source.answer === true ? 'on' : source.answer === false ? 'off' : source.answer, ['auto', 'on', 'off'], 'auto'),
-    locale: text(source.locale),
     includeDomains: domainList(source.includeDomains),
     excludeDomains: domainList(source.excludeDomains),
     strict: booleanOr(source.strict, false),
@@ -209,15 +205,15 @@ function resolveConfig(raw) {
  */
 const CAPABILITIES = {
   tavily: {
-    search: { recency: 'partial', domains: 'yes', locale: 'partial', depth: 'yes', answer: 'yes' },
+    search: { domains: 'yes', depth: 'yes', answer: 'yes' },
     fetch: { mainContent: 'no', cache: 'no' },
   },
   exa: {
-    search: { recency: 'yes', domains: 'yes', locale: 'yes', depth: 'yes', answer: 'no' },
+    search: { domains: 'yes', depth: 'yes', answer: 'no' },
     fetch: { mainContent: 'no', cache: 'no' },
   },
   firecrawl: {
-    search: { recency: 'yes', domains: 'yes', locale: 'yes', depth: 'no', answer: 'no' },
+    search: { domains: 'yes', depth: 'no', answer: 'no' },
     fetch: { mainContent: 'yes', cache: 'yes' },
   },
 }
@@ -376,7 +372,6 @@ const clip = (value, limit) => {
 }
 
 const flatten = (value) => String(value ?? '').replace(/\s+/g, ' ').trim()
-
 /** Every vendor's date becomes `YYYY-MM-DD`, or nothing. */
 function toDateOnly(value) {
   const candidate = text(value)
@@ -387,8 +382,6 @@ function toDateOnly(value) {
   if (Number.isNaN(parsed)) return undefined
   return new Date(parsed).toISOString().slice(0, 10)
 }
-
-const isoDaysAgo = (days) => new Date(Date.now() - days * 86400000).toISOString()
 
 async function withDeadline(signal, timeoutMs, label, task) {
   if (signal?.aborted) throw providerError(`${label} aborted`, 'WEB_ABORTED')
@@ -486,18 +479,8 @@ function tavilySearchBody(config, options, request, notices) {
     topic: config.tavilyTopic,
   }
   if (options.answer !== 'off') body.include_answer = true
-  if (options.recency !== 'any') {
-    if (options.strict) {
-      dropOption(options, notices, 'tavily', 'recency', 'it only filters by date when topic=news')
-    } else if (config.tavilyTopic === 'news') {
-      body.days = RECENCY_DAYS[options.recency]
-    } else {
-      dropOption(options, notices, 'tavily', 'recency', 'it only filters by date when topic=news')
-    }
-  }
   if (options.includeDomains.length > 0) body.include_domains = options.includeDomains
   if (options.excludeDomains.length > 0) body.exclude_domains = options.excludeDomains
-  if (options.locale !== '') body.country = options.locale
   return body
 }
 
@@ -519,10 +502,8 @@ function exaSearchBody(config, options, request, notices) {
   if (options.answer === 'on') {
     dropOption(options, notices, 'exa', 'answer', 'it only synthesizes an answer for deep search types')
   }
-  if (options.recency !== 'any') body.startPublishedDate = isoDaysAgo(RECENCY_DAYS[options.recency])
   if (options.includeDomains.length > 0) body.includeDomains = options.includeDomains
   if (options.excludeDomains.length > 0) body.excludeDomains = options.excludeDomains
-  if (options.locale !== '') body.userLocation = options.locale
   return body
 }
 
@@ -538,15 +519,8 @@ function firecrawlSearchBody(config, options, request, notices) {
   if (options.answer === 'on') {
     dropOption(options, notices, 'firecrawl', 'answer', 'its search returns no synthesized answer')
   }
-  if (options.recency !== 'any') {
-    body.tbs = { day: 'qdr:d', week: 'qdr:w', month: 'qdr:m', year: 'qdr:y' }[options.recency]
-  }
   if (options.includeDomains.length > 0) body.includeDomains = options.includeDomains
   if (options.excludeDomains.length > 0) body.excludeDomains = options.excludeDomains
-  if (options.locale !== '') {
-    const country = options.locale.includes('-') ? options.locale.split('-').pop() : options.locale
-    body.country = country.toUpperCase().slice(0, 2)
-  }
   return body
 }
 

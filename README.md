@@ -10,7 +10,7 @@ web_fetch  ─┘   （本插件负责转换）  └─ exa / firecrawl
 
 工具层（`dsh-tool-web`）只认一套请求与结果结构，三家厂商的差异全部在这里吸收：
 
-- **输入归一**：对外只暴露语义旋钮（时间范围、深度、是否要答案、域名限定、地区），每个 adapter 翻译成厂商自己的参数；厂商做不到的**以 notice 告知模型**，装死不是选项。
+- **输入归一**：对外只暴露语义旋钮（深度、是否要答案、域名限定），每个 adapter 翻译成厂商自己的参数；厂商做不到的**以 notice 告知模型**，装死不是选项。
 - **输出归一**：一个 source 形状、一种日期格式、一套错误码。厂商的 `author`/`score`、`notices`/`warnings`、`failed_results` 都折进同一处，不再漏给上层。
 
 后端与旋钮都在设置页里改，**下一次调用即生效**。
@@ -27,12 +27,12 @@ dsh plugin --profile web add github:nhhc-lxr/dsh-web-tool-provider
 
 | 旋钮 | 取值 | Tavily | Exa | Firecrawl |
 |---|---|---|---|---|
-| `recency` | any / day / week / month / year | ⚠️ 仅 `topic: news` 时有效（否则发 notice） | `startPublishedDate` | `tbs: qdr:*` |
 | `depth` | auto / fast / balanced / deep | `search_depth` basic/advanced | `type` lite/auto/deep | ❌ 发 notice |
 | `answer` | auto / on / off | `include_answer` | ❌ 仅深度合成模式有 | ❌ 发 notice |
 | `includeDomains` / `excludeDomains` | 逗号分隔 | `include_domains` / `exclude_domains` | `includeDomains` / `excludeDomains` | `includeDomains` / `excludeDomains` |
-| `locale` | `US`、`zh-CN`、`united states` | ⚠️ `country`（要国家名） | `userLocation`（ISO） | `country`（ISO-2，`zh-CN`→`CN`） |
 | `strict` | true / false | 不支持就报错，而不是发 notice | | |
+
+时间范围（recency）和地区（country）**故意没做**：Tavily 的日期过滤只在 `topic:news` 下生效、`country` 要国家名而非 ISO 码，Exa 与 Firecrawl 又要 ISO/`tbs` 两套写法——语义对不齐，与其造一个“看起来能用”的假旋钮，不如留给需要时再单独加。
 
 抓取侧只有 `fallbackToHttp` / `firecrawlMainContent` 两个总开关（其余厂商能力差异无意义，直接忽略）。
 

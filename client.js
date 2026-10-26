@@ -6,7 +6,6 @@ window.__ModuleLoader__.load({
 
     const ENDPOINT = '/web-tool-provider/state'
     const VENDORS = ['tavily', 'exa', 'firecrawl']
-    const RECENCY = ['any', 'day', 'week', 'month', 'year']
     const DEPTH = ['auto', 'fast', 'balanced', 'deep']
     const ANSWER = ['auto', 'on', 'off']
 
@@ -23,10 +22,8 @@ window.__ModuleLoader__.load({
         optionsTitle: 'Shared search options',
         optionsHint:
           'These are vendor-neutral. Each backend honours what it can; the rest is reported to the model as a notice instead of changing behaviour silently.',
-        recency: 'Recency',
         depth: 'Search depth',
         answer: 'Synthesized answer',
-        locale: 'Country / locale',
         includeDomains: 'Only these domains',
         excludeDomains: 'Exclude these domains',
         strict: 'Strict mode — fail instead of ignoring an unsupported option',
@@ -51,13 +48,7 @@ window.__ModuleLoader__.load({
         keyPlaceholder: 'Paste the key',
         perCall: 'Applies to the next call — no restart needed.',
         domainsPlaceholder: 'a.com, b.com',
-        localePlaceholder: 'US',
         auto: 'auto (vendor default)',
-        any: 'any',
-        day: 'past 24 hours',
-        week: 'past week',
-        month: 'past month',
-        year: 'past year',
         fast: 'fast',
         balanced: 'balanced',
         deep: 'deep (costs more)',
@@ -76,10 +67,8 @@ window.__ModuleLoader__.load({
         optionsTitle: '统一检索选项',
         optionsHint:
           '这些是厂商无关的语义选项。后端能做就做，做不到的会以 notice 形式告知模型，而不是悄悄改行为。',
-        recency: '时间范围',
         depth: '检索深度',
         answer: '合成答案',
-        locale: '国家 / 地区',
         includeDomains: '只搜这些域名',
         excludeDomains: '排除这些域名',
         strict: '严格模式——不支持的选项直接报错，而不是忽略',
@@ -104,13 +93,7 @@ window.__ModuleLoader__.load({
         keyPlaceholder: '粘贴密钥',
         perCall: '下一次调用即生效，不用重启。',
         domainsPlaceholder: 'a.com, b.com',
-        localePlaceholder: 'US',
         auto: '自动（厂商默认）',
-        any: '不限',
-        day: '24 小时内',
-        week: '一周内',
-        month: '一个月内',
-        year: '一年内',
         fast: '快',
         balanced: '均衡',
         deep: '深度（更贵）',
@@ -383,23 +366,6 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { style: styles.row },
-          h('span', { style: styles.label }, t('recency')),
-          h(
-            'select',
-            {
-              style: styles.select,
-              value: options.recency || 'any',
-              disabled: busy || supportOf(capabilities, backend, 'recency') === 'no',
-              onChange: (event) => setOption({ recency: event.target.value }),
-            },
-            RECENCY.map((value) => optionTag(value, 'recency')),
-          ),
-          supportTag('recency'),
-        ),
-
-        h(
-          'div',
-          { style: styles.row },
           h('span', { style: styles.label }, t('depth')),
           h(
             'select',
@@ -429,21 +395,6 @@ window.__ModuleLoader__.load({
             ANSWER.map((value) => optionTag(value, 'answer')),
           ),
           supportTag('answer'),
-        ),
-
-        h(
-          'div',
-          { style: styles.row },
-          h('span', { style: styles.label }, t('locale')),
-          h('input', {
-            style: styles.input,
-            type: 'text',
-            placeholder: t('localePlaceholder'),
-            value: options.locale || '',
-            disabled: busy || supportOf(capabilities, backend, 'locale') === 'no',
-            onChange: (event) => setOption({ locale: event.target.value }),
-          }),
-          supportTag('locale'),
         ),
 
         h(
@@ -505,10 +456,8 @@ window.__ModuleLoader__.load({
                 apply(
                   {
                     options: {
-                      recency: options.recency,
                       depth: options.depth,
                       answer: options.answer,
-                      locale: options.locale,
                       includeDomains: options.includeDomains,
                       excludeDomains: options.excludeDomains,
                       strict: options.strict,

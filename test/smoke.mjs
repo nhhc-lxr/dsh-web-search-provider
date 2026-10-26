@@ -158,46 +158,42 @@ await check('dates become YYYY-MM-DD and long snippets are clipped', async () =>
 
 /* -------------------------------------------------------- input mapping -- */
 
-await check('recency/domains/locale/depth reach tavily as its own parameters', async () => {
+await check('depth and domain filters reach tavily as its own parameters', async () => {
   stubFetch(() => json(TAVILY_SEARCH))
   const { registry } = harness({
     ...KEYS,
-    tavilyTopic: 'news',
-    options: { recency: 'week', depth: 'deep', includeDomains: ['a.com'], excludeDomains: ['b.com'], locale: 'united states' },
+    options: { depth: 'deep', includeDomains: ['a.com'], excludeDomains: ['b.com'] },
   })
   await registry.search.search({ query: 'q' })
   assert.equal(calls[0].body.search_depth, 'advanced')
-  assert.equal(calls[0].body.days, 7)
   assert.deepEqual(calls[0].body.include_domains, ['a.com'])
   assert.deepEqual(calls[0].body.exclude_domains, ['b.com'])
-  assert.equal(calls[0].body.country, 'united states')
+  assert.equal('days' in calls[0].body, false)
 })
 
 await check('the same knobs reach exa as ITS own parameters', async () => {
   stubFetch(() => json({ results: [] }))
   const { registry: exaRegistry, route } = harness({
     ...KEYS,
-    options: { recency: 'month', depth: 'fast', includeDomains: ['a.com'], locale: 'US' },
+    options: { depth: 'fast', includeDomains: ['a.com'] },
   })
   await call(route, { method: 'POST', body: { searchBackend: 'exa' } })
   await exaRegistry.search.search({ query: 'q' })
   assert.equal(calls[0].body.type, 'lite')
   assert.deepEqual(calls[0].body.includeDomains, ['a.com'])
-  assert.equal(calls[0].body.userLocation, 'US')
-  assert.match(calls[0].body.startPublishedDate, /^\d{4}-\d{2}-\d{2}T/)
+  assert.equal('startPublishedDate' in calls[0].body, false)
 })
 
-await check('the same knobs reach firecrawl as ITS own parameters', async () => {
+await check('domain filters reach firecrawl as ITS own parameters', async () => {
   stubFetch(() => json({ success: true, data: { web: [] } }))
   const { registry, route } = harness({
     ...KEYS,
-    options: { recency: 'day', includeDomains: ['a.com'], locale: 'zh-CN' },
+    options: { includeDomains: ['a.com'] },
   })
   await call(route, { method: 'POST', body: { searchBackend: 'firecrawl' } })
   await registry.search.search({ query: 'q' })
-  assert.equal(calls[0].body.tbs, 'qdr:d')
   assert.deepEqual(calls[0].body.includeDomains, ['a.com'])
-  assert.equal(calls[0].body.country, 'CN')
+  assert.equal('tbs' in calls[0].body, false)
 })
 
 /* ------------------------------------------------------ output contract -- */
@@ -302,13 +298,14 @@ await check('tavily extract failures name the vendor reason', async () => {
 /* ---------------------------------------------------------------- state -- */
 
 await check('GET exposes options and the capability matrix', async () => {
-  const { route } = harness({ options: { recency: 'week', depth: 'fast' } })
+  const { route } = harness({ options: { depth: 'fast' } })
   const { payload } = await call(route, {})
-  assert.equal(payload.options.recency, 'week')
   assert.equal(payload.options.depth, 'fast')
+  assert.equal(payload.options.recency, undefined)
+  assert.equal(payload.options.locale, undefined)
   assert.equal(payload.capabilities.firecrawl.search.depth, 'no')
   assert.equal(payload.capabilities.tavily.search.depth, 'yes')
-  assert.equal(payload.capabilities.tavily.search.recency, 'partial')
+  assert.equal(payload.capabilities.exa.search.answer, 'no')
 })
 
 await check('POST persists backends and options together', async () => {
@@ -317,19 +314,19 @@ await check('POST persists backends and options together', async () => {
     method: 'POST',
     body: {
       searchBackend: 'exa',
-      options: { recency: 'year', includeDomains: ['a.com', 'b.com'], strict: true },
+      options: { answer: 'on', includeDomains: ['a.com', 'b.com'], strict: true },
     },
   })
   assert.equal(out.payload.persistence.persisted, true)
   const stored = JSON.parse(readFileSync(join(SANDBOX, 'web-tool-provider', 'state.json'), 'utf8'))
   assert.equal(stored.searchBackend, 'exa')
-  assert.equal(stored.options.recency, 'year')
+  assert.equal(stored.options.answer, 'on')
   assert.equal(stored.options.strict, true)
 
-  const restarted = harness({ options: { recency: 'any' } })
+  const restarted = harness({ options: { answer: 'auto' } })
   const snapshot = await call(restarted.route, {})
   assert.equal(snapshot.payload.searchBackend, 'exa')
-  assert.equal(snapshot.payload.options.recency, 'year')
+  assert.equal(snapshot.payload.options.answer, 'on')
   assert.deepEqual(snapshot.payload.options.includeDomains, ['a.com', 'b.com'])
 })
 
