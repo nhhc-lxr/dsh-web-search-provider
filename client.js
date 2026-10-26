@@ -8,27 +8,28 @@ window.__ModuleLoader__.load({
     const VENDORS = ['tavily', 'exa', 'firecrawl']
     const DEPTH = ['auto', 'fast', 'balanced', 'deep']
     const ANSWER = ['auto', 'on', 'off']
+    const TOPICS = ['general', 'news', 'finance']
+    const TYPES = ['auto', 'lite', 'deep']
+    const VERSIONS = ['v2', 'v1']
 
     const DICT = {
       en: {
         tab: 'Web tools',
         title: 'Web tool provider',
         subtitle:
-          'One provider in front of web_search and web_fetch. Pick the backend, tune the shared options once, and keep keys in the harness credential store.',
-        backendsTitle: 'Backends',
-        searchBackend: 'web_search backend',
-        fetchBackend: 'web_fetch backend',
-        saveBackends: 'Save backends',
-        optionsTitle: 'Shared search options',
-        optionsHint:
-          'These are vendor-neutral. Each backend honours what it can; the rest is reported to the model as a notice instead of changing behaviour silently.',
-        depth: 'Search depth',
-        answer: 'Synthesized answer',
-        includeDomains: 'Only these domains',
-        excludeDomains: 'Exclude these domains',
-        strict: 'Strict mode — fail instead of ignoring an unsupported option',
-        saveOptions: 'Save options',
+          'One provider in front of web_search and web_fetch. Shared options are set once per tool; each backend keeps its own connection settings.',
+        tabsSearch: 'web_search',
+        tabsFetch: 'web_fetch',
+        common: 'Shared search options',
+        commonFetch: 'Shared fetch options',
         keys: 'API keys',
+        active: 'active',
+        use: 'Use for this tool',
+        save: 'Save',
+        clear: 'Clear',
+        saved: 'Saved',
+        cleared: 'Cleared',
+        localOnly: 'Applied now, but not persisted: ',
         configured: 'configured',
         fromEnv: 'from environment',
         fromConfig: 'from plugin config',
@@ -36,44 +37,59 @@ window.__ModuleLoader__.load({
         supported: 'supported',
         partial: 'partial',
         unsupported: 'unsupported',
-        save: 'Save',
-        clear: 'Clear',
-        saved: 'Saved',
-        cleared: 'Cleared',
-        localOnly: 'Applied now, but not persisted: ',
-        fallbackOn: 'web_fetch falls back to a credential-free local fetch when the backend fails.',
-        fallbackOff: 'web_fetch has no fallback: a backend failure is returned to the model.',
+        maxResults: 'Results per query',
+        depth: 'Search depth',
+        answer: 'Synthesized answer',
+        strict: 'Strict mode — fail instead of ignoring an unsupported option',
+        includeDomains: 'Only these domains',
+        excludeDomains: 'Exclude these domains',
+        fallback: 'Fall back to a direct HTTP fetch when the backend fails',
+        baseURL: 'API base URL',
+        timeoutMs: 'Timeout (ms)',
+        maxChars: 'Max characters',
+        topic: 'Topic',
+        searchDepth: 'Tavily depth when the knob is auto',
+        searchType: 'Exa type when the knob is auto',
+        version: 'API version',
+        mainContent: 'Only main content',
+        maxAge: 'Cache max age (ms)',
         loading: 'Loading…',
         loadFailed: 'Could not read the plugin state: ',
         keyPlaceholder: 'Paste the key',
         perCall: 'Applies to the next call — no restart needed.',
         domainsPlaceholder: 'a.com, b.com',
-        auto: 'auto (vendor default)',
-        fast: 'fast',
-        balanced: 'balanced',
-        deep: 'deep (costs more)',
+        auto: 'auto',
         on: 'on',
         off: 'off',
+        fast: 'fast',
+        balanced: 'balanced',
+        deep: 'deep',
+        general: 'general',
+        news: 'news',
+        finance: 'finance',
+        lite: 'lite',
+        basic: 'basic',
+        advanced: 'advanced',
+        v1: 'v1',
+        v2: 'v2',
       },
       zh: {
         tab: '网页工具',
         title: '网页工具后端',
         subtitle:
-          'web_search 与 web_fetch 共用的一个 provider。选后端、统一调检索选项、密钥放 Harness 凭据库。',
-        backendsTitle: '后端选择',
-        searchBackend: 'web_search 后端',
-        fetchBackend: 'web_fetch 后端',
-        saveBackends: '保存后端',
-        optionsTitle: '统一检索选项',
-        optionsHint:
-          '这些是厂商无关的语义选项。后端能做就做，做不到的会以 notice 形式告知模型，而不是悄悄改行为。',
-        depth: '检索深度',
-        answer: '合成答案',
-        includeDomains: '只搜这些域名',
-        excludeDomains: '排除这些域名',
-        strict: '严格模式——不支持的选项直接报错，而不是忽略',
-        saveOptions: '保存选项',
+          'web_search 与 web_fetch 共用一个 provider。通用参数按工具各设一次，各家只保留自己的连接与行为设置。',
+        tabsSearch: '搜索 web_search',
+        tabsFetch: '抓取 web_fetch',
+        common: '通用搜索参数',
+        commonFetch: '通用抓取参数',
         keys: 'API 密钥',
+        active: '使用中',
+        use: '设为该工具后端',
+        save: '保存',
+        clear: '清除',
+        saved: '已保存',
+        cleared: '已清除',
+        localOnly: '已生效，但未能持久化：',
         configured: '已配置',
         fromEnv: '来自环境变量',
         fromConfig: '来自插件配置',
@@ -81,24 +97,41 @@ window.__ModuleLoader__.load({
         supported: '支持',
         partial: '部分支持',
         unsupported: '不支持',
-        save: '保存',
-        clear: '清除',
-        saved: '已保存',
-        cleared: '已清除',
-        localOnly: '已生效，但未能持久化：',
-        fallbackOn: '后端失败时，web_fetch 会退回无需密钥的本地抓取。',
-        fallbackOff: 'web_fetch 没有降级：后端失败会直接返回给模型。',
+        maxResults: '每次查询条数',
+        depth: '检索深度',
+        answer: '合成答案',
+        strict: '严格模式——不支持的选项直接报错，而不是忽略',
+        includeDomains: '只搜这些域名',
+        excludeDomains: '排除这些域名',
+        fallback: '后端失败时退回直接 HTTP 抓取',
+        baseURL: '接口地址',
+        timeoutMs: '超时（毫秒）',
+        maxChars: '正文上限（字符）',
+        topic: '主题',
+        searchDepth: '深度为 auto 时 Tavily 用',
+        searchType: '深度为 auto 时 Exa 用',
+        version: '接口版本',
+        mainContent: '只取正文',
+        maxAge: '缓存有效期（毫秒）',
         loading: '加载中…',
         loadFailed: '读取插件状态失败：',
         keyPlaceholder: '粘贴密钥',
         perCall: '下一次调用即生效，不用重启。',
         domainsPlaceholder: 'a.com, b.com',
-        auto: '自动（厂商默认）',
-        fast: '快',
-        balanced: '均衡',
-        deep: '深度（更贵）',
+        auto: '自动',
         on: '开启',
         off: '关闭',
+        fast: '快',
+        balanced: '均衡',
+        deep: '深度',
+        general: '综合',
+        news: '新闻',
+        finance: '财经',
+        lite: '轻量',
+        basic: '基础',
+        advanced: '进阶',
+        v1: 'v1',
+        v2: 'v2',
       },
     }
 
@@ -132,9 +165,9 @@ window.__ModuleLoader__.load({
     }
 
     const styles = {
-      page: { padding: '4px 0 24px', maxWidth: 760, color: 'var(--dsw-alias-label-primary)' },
+      page: { padding: '4px 0 24px', maxWidth: 780, color: 'var(--dsw-alias-label-primary)' },
       title: { margin: '0 0 6px', fontSize: 15, fontWeight: 600 },
-      subtitle: { margin: '0 0 18px', fontSize: 12, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)' },
+      subtitle: { margin: '0 0 16px', fontSize: 12, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)' },
       card: {
         border: '1px solid var(--dsw-alias-border-l1)',
         borderRadius: 10,
@@ -142,12 +175,13 @@ window.__ModuleLoader__.load({
         padding: '14px 16px',
         marginBottom: 14,
       },
-      cardTitle: { margin: '0 0 12px', fontSize: 13, fontWeight: 600 },
+      cardHead: { display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 12px', flexWrap: 'wrap' },
+      cardTitle: { margin: 0, fontSize: 13, fontWeight: 600 },
       row: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' },
       label: { fontSize: 12, minWidth: 150, color: 'var(--dsw-alias-label-secondary)' },
       select: {
-        flex: '1 1 180px',
-        minWidth: 160,
+        flex: '1 1 170px',
+        minWidth: 150,
         height: 30,
         padding: '0 8px',
         fontSize: 12,
@@ -157,8 +191,8 @@ window.__ModuleLoader__.load({
         borderRadius: 7,
       },
       input: {
-        flex: '1 1 220px',
-        minWidth: 180,
+        flex: '1 1 200px',
+        minWidth: 160,
         height: 30,
         padding: '0 9px',
         fontSize: 12,
@@ -187,8 +221,18 @@ window.__ModuleLoader__.load({
         borderRadius: 7,
         cursor: 'pointer',
       },
-      keyRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' },
-      vendor: { fontSize: 12, fontWeight: 600, minWidth: 78 },
+      tabBar: { display: 'flex', gap: 6, marginBottom: 14 },
+      tab: (active) => ({
+        height: 30,
+        padding: '0 14px',
+        fontSize: 12,
+        fontWeight: active ? 600 : 400,
+        color: active ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
+        background: active ? 'var(--dsw-alias-bg-layer-1)' : 'transparent',
+        border: `1px solid ${active ? 'var(--dsw-alias-border-l2)' : 'transparent'}`,
+        borderRadius: 8,
+        cursor: 'pointer',
+      }),
       badge: {
         fontSize: 11,
         padding: '2px 7px',
@@ -196,6 +240,7 @@ window.__ModuleLoader__.load({
         border: '1px solid currentColor',
         whiteSpace: 'nowrap',
       },
+      vendorName: { fontSize: 12, fontWeight: 600, minWidth: 76 },
       note: { margin: '10px 0 0', fontSize: 11, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)' },
       error: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' },
       ok: { fontSize: 12, color: 'var(--dsw-alias-state-success-primary)' },
@@ -218,6 +263,7 @@ window.__ModuleLoader__.load({
       return payload
     }
 
+    const clone = (value) => JSON.parse(JSON.stringify(value))
     const joinDomains = (value) => (Array.isArray(value) ? value.join(', ') : '')
     const splitDomains = (value) =>
       String(value)
@@ -238,11 +284,21 @@ window.__ModuleLoader__.load({
       return { ...styles.badge, color: 'var(--dsw-alias-state-success-primary)' }
     }
 
+    function keyBadge(t, key) {
+      const configured = key && key.configured
+      const source = key && key.source
+      let label = configured ? t('configured') : t('missing')
+      if (configured && source === 'env') label = `${t('configured')} · ${t('fromEnv')}`
+      else if (configured && source === 'config') label = `${t('configured')} · ${t('fromConfig')}`
+      return h('span', { style: badgeStyle(configured ? 'yes' : 'no') }, label)
+    }
+
     function ProviderPage() {
       const [state, setState] = React.useState(null)
       const [error, setError] = React.useState('')
       const [busy, setBusy] = React.useState(false)
       const [notice, setNotice] = React.useState('')
+      const [tab, setTab] = React.useState('search')
       const [draftKeys, setDraftKeys] = React.useState({})
       const t = React.useMemo(() => createTranslate({ get: () => undefined }), [])
 
@@ -291,141 +347,119 @@ window.__ModuleLoader__.load({
         return h('div', { style: styles.page }, h('p', { style: styles.error }, `${t('loadFailed')}${error}`))
       }
 
-      const backends = Array.isArray(state.backends) && state.backends.length > 0 ? state.backends : VENDORS
-      const options = state.options || {}
       const capabilities = state.capabilities || {}
-      const backend = state.searchBackend
+      const capabilitiesFor = tab === 'search' ? state.search.backend : state.fetch.backend
 
-      const optionTag = (value, key) => h('option', { key: value + key, value }, t(value) === value ? value : t(value))
-
-      const supportTag = (capability) => {
-        const kind = supportOf(capabilities, backend, capability)
-        const text = kind === 'no' ? t('unsupported') : kind === 'partial' ? t('partial') : t('supported')
-        return h('span', { style: badgeStyle(kind) }, text)
+      const edit = (mutate) => {
+        const next = clone(state)
+        mutate(next)
+        setState(next)
       }
 
-      const setOption = (patch) => setState({ ...state, options: { ...options, ...patch } })
+      const optionTag = (value) => h('option', { key: value, value }, t(value))
 
-      const backendsCard = h(
-        'div',
-        { style: styles.card },
-        h('h3', { style: styles.cardTitle }, t('backendsTitle')),
+      const numericRow = (label, value, onInput) =>
         h(
           'div',
-          { style: styles.row },
-          h('span', { style: styles.label }, t('searchBackend')),
-          h(
-            'select',
-            {
-              style: styles.select,
-              value: state.searchBackend,
-              disabled: busy,
-              onChange: (event) => setState({ ...state, searchBackend: event.target.value }),
-            },
-            backends.map((value) => optionTag(value, 'search')),
-          ),
-        ),
-        h(
-          'div',
-          { style: styles.row },
-          h('span', { style: styles.label }, t('fetchBackend')),
-          h(
-            'select',
-            {
-              style: styles.select,
-              value: state.fetchBackend,
-              disabled: busy,
-              onChange: (event) => setState({ ...state, fetchBackend: event.target.value }),
-            },
-            backends.map((value) => optionTag(value, 'fetch')),
-          ),
-        ),
-        h(
-          'div',
-          { style: styles.row },
-          h('span', { style: styles.label }, ''),
-          h(
-            'button',
-            {
-              style: styles.primary,
-              disabled: busy,
-              onClick: () =>
-                apply({ searchBackend: state.searchBackend, fetchBackend: state.fetchBackend }, 'saved'),
-            },
-            t('saveBackends'),
-          ),
-        ),
-      )
+          { style: styles.row, key: label },
+          h('span', { style: styles.label }, label),
+          h('input', {
+            style: styles.input,
+            type: 'number',
+            value: value,
+            disabled: busy,
+            onChange: (event) => onInput(Number(event.target.value)),
+          }),
+        )
 
-      const optionsCard = h(
-        'div',
-        { style: styles.card },
-        h('h3', { style: styles.cardTitle }, t('optionsTitle')),
-        h('p', { style: styles.note }, t('optionsHint')),
-
+      const textRow = (label, value, onInput, placeholder) =>
         h(
           'div',
-          { style: styles.row },
-          h('span', { style: styles.label }, t('depth')),
-          h(
-            'select',
-            {
-              style: styles.select,
-              value: options.depth || 'auto',
-              disabled: busy || supportOf(capabilities, backend, 'depth') === 'no',
-              onChange: (event) => setOption({ depth: event.target.value }),
-            },
-            DEPTH.map((value) => optionTag(value, 'depth')),
-          ),
-          supportTag('depth'),
-        ),
-
-        h(
-          'div',
-          { style: styles.row },
-          h('span', { style: styles.label }, t('answer')),
-          h(
-            'select',
-            {
-              style: styles.select,
-              value: options.answer || 'auto',
-              disabled: busy || supportOf(capabilities, backend, 'answer') === 'no',
-              onChange: (event) => setOption({ answer: event.target.value }),
-            },
-            ANSWER.map((value) => optionTag(value, 'answer')),
-          ),
-          supportTag('answer'),
-        ),
-
-        h(
-          'div',
-          { style: styles.row },
-          h('span', { style: styles.label }, t('includeDomains')),
+          { style: styles.row, key: label },
+          h('span', { style: styles.label }, label),
           h('input', {
             style: styles.input,
             type: 'text',
-            placeholder: t('domainsPlaceholder'),
-            value: joinDomains(options.includeDomains),
-            disabled: busy || supportOf(capabilities, backend, 'domains') === 'no',
-            onChange: (event) => setOption({ includeDomains: splitDomains(event.target.value) }),
+            value: value,
+            placeholder: placeholder || '',
+            disabled: busy,
+            onChange: (event) => onInput(event.target.value),
           }),
-          supportTag('domains'),
-        ),
+        )
 
+      const selectRow = (label, value, values, onChange, support) =>
         h(
           'div',
-          { style: styles.row },
-          h('span', { style: styles.label }, t('excludeDomains')),
-          h('input', {
-            style: styles.input,
-            type: 'text',
-            placeholder: t('domainsPlaceholder'),
-            value: joinDomains(options.excludeDomains),
-            disabled: busy || supportOf(capabilities, backend, 'domains') === 'no',
-            onChange: (event) => setOption({ excludeDomains: splitDomains(event.target.value) }),
+          { style: styles.row, key: label },
+          h('span', { style: styles.label }, label),
+          h(
+            'select',
+            {
+              style: styles.select,
+              value: value,
+              disabled: busy || support === 'no',
+              onChange: (event) => onChange(event.target.value),
+            },
+            values.map(optionTag),
+          ),
+          support === undefined
+            ? null
+            : h(
+                'span',
+                { style: badgeStyle(support) },
+                t(support === 'no' ? 'unsupported' : support === 'partial' ? 'partial' : 'supported'),
+              ),
+        )
+
+      const supportFor = (capability) => supportOf(capabilities, capabilitiesFor, capability)
+
+      const searchCommon = h(
+        'div',
+        { style: styles.card },
+        h('h3', { style: styles.cardTitle }, t('common')),
+        numericRow(t('maxResults'), state.search.options.maxResults, (value) =>
+          edit((next) => {
+            next.search.options.maxResults = value
           }),
         ),
-
+        selectRow(
+          t('depth'),
+          state.search.options.depth,
+          DEPTH,
+          (value) =>
+            edit((next) => {
+              next.search.options.depth = value
+            }),
+          supportFor('depth'),
+        ),
+        selectRow(
+          t('answer'),
+          state.search.options.answer,
+          ANSWER,
+          (value) =>
+            edit((next) => {
+              next.search.options.answer = value
+            }),
+          supportFor('answer'),
+        ),
+        textRow(
+          t('includeDomains'),
+          joinDomains(state.search.options.includeDomains),
+          (value) =>
+            edit((next) => {
+              next.search.options.includeDomains = splitDomains(value)
+            }),
+          t('domainsPlaceholder'),
+        ),
+        textRow(
+          t('excludeDomains'),
+          joinDomains(state.search.options.excludeDomains),
+          (value) =>
+            edit((next) => {
+              next.search.options.excludeDomains = splitDomains(value)
+            }),
+          t('domainsPlaceholder'),
+        ),
         h(
           'div',
           { style: styles.row },
@@ -435,61 +469,188 @@ window.__ModuleLoader__.load({
             { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 } },
             h('input', {
               type: 'checkbox',
-              checked: Boolean(options.strict),
+              checked: Boolean(state.search.options.strict),
               disabled: busy,
-              onChange: (event) => setOption({ strict: event.target.checked }),
+              onChange: (event) =>
+                edit((next) => {
+                  next.search.options.strict = event.target.checked
+                }),
             }),
             t('strict'),
           ),
         ),
+      )
 
+      const fetchCommon = h(
+        'div',
+        { style: styles.card },
+        h('h3', { style: styles.cardTitle }, t('commonFetch')),
         h(
           'div',
           { style: styles.row },
           h('span', { style: styles.label }, ''),
           h(
-            'button',
-            {
-              style: styles.primary,
+            'label',
+            { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 } },
+            h('input', {
+              type: 'checkbox',
+              checked: Boolean(state.fetch.options.fallbackToHttp),
               disabled: busy,
-              onClick: () =>
-                apply(
-                  {
-                    options: {
-                      depth: options.depth,
-                      answer: options.answer,
-                      includeDomains: options.includeDomains,
-                      excludeDomains: options.excludeDomains,
-                      strict: options.strict,
-                    },
-                  },
-                  'saved',
-                ),
-            },
-            t('saveOptions'),
+              onChange: (event) =>
+                edit((next) => {
+                  next.fetch.options.fallbackToHttp = event.target.checked
+                }),
+            }),
+            t('fallback'),
           ),
         ),
+        h('p', { style: styles.note }, t('perCall')),
       )
 
-      const keyRows = VENDORS.map((vendor) => {
-        const info = (state.keys && state.keys[vendor]) || {}
-        const draft = draftKeys[vendor] === undefined ? '' : draftKeys[vendor]
-        const configured = info.configured
-        const source = info.source
-        let label = configured ? t('configured') : t('missing')
-        if (configured && source === 'env') label = `${t('configured')} · ${t('fromEnv')}`
-        else if (configured && source === 'config') label = `${t('configured')} · ${t('fromConfig')}`
+      const providerCard = (vendor) => {
+        const provider = state.providers[vendor]
+        const activeBackend = tab === 'search' ? state.search.backend : state.fetch.backend
+        const isActive = activeBackend === vendor
+        const rows = [
+          textRow(
+            t('baseURL'),
+            provider.baseURL,
+            (value) =>
+              edit((next) => {
+                next.providers[vendor].baseURL = value
+              }),
+            '',
+          ),
+          numericRow(t('timeoutMs'), provider.timeoutMs, (value) =>
+            edit((next) => {
+              next.providers[vendor].timeoutMs = value
+            }),
+          ),
+          numericRow(t('maxChars'), provider.maxChars, (value) =>
+            edit((next) => {
+              next.providers[vendor].maxChars = value
+            }),
+          ),
+        ]
+
+        if (tab === 'search' && vendor === 'tavily') {
+          rows.push(
+            selectRow(t('topic'), provider.topic, TOPICS, (value) =>
+              edit((next) => {
+                next.providers.tavily.topic = value
+              }),
+            ),
+            selectRow(t('searchDepth'), provider.searchDepth, ['basic', 'advanced'], (value) =>
+              edit((next) => {
+                next.providers.tavily.searchDepth = value
+              }),
+            ),
+          )
+        }
+        if (tab === 'search' && vendor === 'exa') {
+          rows.push(
+            selectRow(t('searchType'), provider.searchType, TYPES, (value) =>
+              edit((next) => {
+                next.providers.exa.searchType = value
+              }),
+            ),
+          )
+        }
+        if (vendor === 'firecrawl') {
+          rows.push(
+            selectRow(t('version'), provider.version, VERSIONS, (value) =>
+              edit((next) => {
+                next.providers.firecrawl.version = value
+              }),
+            ),
+          )
+          if (tab === 'fetch') {
+            rows.push(
+              h(
+                'div',
+                { style: styles.row, key: 'mainContent' },
+                h('span', { style: styles.label }, ''),
+                h(
+                  'label',
+                  { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 } },
+                  h('input', {
+                    type: 'checkbox',
+                    checked: Boolean(provider.mainContent),
+                    disabled: busy,
+                    onChange: (event) =>
+                      edit((next) => {
+                        next.providers.firecrawl.mainContent = event.target.checked
+                      }),
+                  }),
+                  t('mainContent'),
+                ),
+              ),
+              numericRow(t('maxAge'), provider.maxAge, (value) =>
+                edit((next) => {
+                  next.providers.firecrawl.maxAge = value
+                }),
+              ),
+            )
+          }
+        }
+
         return h(
           'div',
-          { key: vendor, style: styles.keyRow },
-          h('span', { style: styles.vendor }, vendor),
-          h('span', { style: badgeStyle(configured ? 'yes' : 'no') }, label),
+          { style: styles.card, key: vendor },
+          h(
+            'div',
+            { style: styles.cardHead },
+            h('span', { style: styles.vendorName }, vendor),
+            keyBadge(t, provider.key),
+            isActive ? h('span', { style: badgeStyle('yes') }, t('active')) : null,
+            isActive
+              ? null
+              : h(
+                  'button',
+                  {
+                    style: styles.button,
+                    disabled: busy,
+                    onClick: () =>
+                      apply(
+                        tab === 'search' ? { search: { backend: vendor } } : { fetch: { backend: vendor } },
+                        'saved',
+                      ),
+                  },
+                  t('use'),
+                ),
+          ),
+          rows,
+        )
+      }
+
+      const saveTab = () => {
+        const body =
+          tab === 'search'
+            ? {
+                search: { backend: state.search.backend, options: state.search.options },
+                providers: state.providers,
+              }
+            : {
+                fetch: { backend: state.fetch.backend, options: state.fetch.options },
+                providers: state.providers,
+              }
+        apply(body, 'saved')
+      }
+
+      const keyRows = VENDORS.map((vendor) => {
+        const key = state.providers[vendor].key || {}
+        const draft = draftKeys[vendor] === undefined ? '' : draftKeys[vendor]
+        return h(
+          'div',
+          { key: vendor, style: styles.row },
+          h('span', { style: styles.vendorName }, vendor),
+          keyBadge(t, key),
           h('input', {
             style: styles.input,
             type: 'password',
             autoComplete: 'off',
             spellCheck: false,
-            placeholder: `${t('keyPlaceholder')} (${info.ref || vendor})`,
+            placeholder: `${t('keyPlaceholder')} (${key.ref || vendor})`,
             value: draft,
             disabled: busy,
             onChange: (event) => setDraftKeys({ ...draftKeys, [vendor]: event.target.value }),
@@ -520,19 +681,24 @@ window.__ModuleLoader__.load({
         { style: styles.page },
         h('h2', { style: styles.title }, t('title')),
         h('p', { style: styles.subtitle }, t('subtitle')),
-        backendsCard,
-        optionsCard,
+        h('div', { style: styles.card }, h('h3', { style: styles.cardTitle }, t('keys')), keyRows),
         h(
           'div',
-          { style: styles.card },
-          h('h3', { style: styles.cardTitle }, t('keys')),
-          keyRows,
-          h('p', { style: styles.note }, state.fallbackToHttp ? t('fallbackOn') : t('fallbackOff')),
-          h('p', { style: styles.note }, t('perCall')),
-          state.stateFile ? h('p', { style: styles.note }, state.stateFile) : null,
+          { style: styles.tabBar },
+          h('button', { style: styles.tab(tab === 'search'), onClick: () => setTab('search') }, t('tabsSearch')),
+          h('button', { style: styles.tab(tab === 'fetch'), onClick: () => setTab('fetch') }, t('tabsFetch')),
+        ),
+        tab === 'search' ? searchCommon : fetchCommon,
+        VENDORS.map(providerCard),
+        h(
+          'div',
+          { style: styles.row },
+          h('span', { style: styles.label }, ''),
+          h('button', { style: styles.primary, disabled: busy, onClick: saveTab }, t('save')),
         ),
         notice === '' ? null : h('p', { style: styles.ok }, notice),
         error === '' ? null : h('p', { style: styles.error }, error),
+        state.stateFile ? h('p', { style: styles.note }, state.stateFile) : null,
       )
     }
 

@@ -3,17 +3,13 @@
 DeepSeek Harness 的 `web_search` / `web_fetch` 与 **Tavily / Exa / Firecrawl** 之间的**归一化中间层**。
 
 ```text
-web_search ─┐                    ┌─ tavily
-            ├─ ctx.web 统一契约 ─┤
-web_fetch  ─┘   （本插件负责转换）  └─ exa / firecrawl
+web_search ─┐                          ┌─ tavily
+            ├─ ctx.web 统一契约 ───────┤
+web_fetch  ─┘   （本插件负责转换）        └─ exa / firecrawl
 ```
 
-工具层（`dsh-tool-web`）只认一套请求与结果结构，三家厂商的差异全部在这里吸收：
-
-- **输入归一**：对外只暴露语义旋钮（深度、是否要答案、域名限定），每个 adapter 翻译成厂商自己的参数；厂商做不到的**以 notice 告知模型**，装死不是选项。
-- **输出归一**：一个 source 形状、一种日期格式、一套错误码。厂商的 `author`/`score`、`notices`/`warnings`、`failed_results` 都折进同一处，不再漏给上层。
-
-后端与旋钮都在设置页里改，**下一次调用即生效**。
+- **输入归一**：只有一套语义旋钮（条数、深度、是否要答案、域名白/黑名单），每个 adapter 翻译成厂商自己的参数；厂商做不到的**以 notice 告知模型**，装死不是选项。
+- **输出归一**：一个 source 形状、一种日期格式、一套错误码；厂商的 `author`/`warnings`/`failed_results` 都折进同一处。
 
 ## 安装
 
@@ -21,53 +17,56 @@ web_fetch  ─┘   （本插件负责转换）  └─ exa / firecrawl
 dsh plugin --profile web add github:nhhc-lxr/dsh-web-tool-provider
 ```
 
-## 统一契约
+## 设置页
 
-### 输入：语义旋钮 → 各厂商参数
+**Settings → Plugins → 网页工具后端**，三层结构：
 
-| 旋钮 | 取值 | Tavily | Exa | Firecrawl |
-|---|---|---|---|---|
-| `depth` | auto / fast / balanced / deep | `search_depth` basic/advanced | `type` lite/auto/deep | ❌ 发 notice |
-| `answer` | auto / on / off | `include_answer` | ❌ 仅深度合成模式有 | ❌ 发 notice |
-| `includeDomains` / `excludeDomains` | 逗号分隔 | `include_domains` / `exclude_domains` | `includeDomains` / `excludeDomains` | `includeDomains` / `excludeDomains` |
-| `strict` | true / false | 不支持就报错，而不是发 notice | | |
+```text
+┌ API 密钥 ──────────────────────────┐   三家各一行，存进凭据库
+├ [搜索 web_search] [抓取 web_fetch] ┤   两个 tab，互不干扰
+│  通用参数                          │   条数 / 深度 / 答案 / 黑白域名 / strict
+│  Tavily   Exa   Firecrawl          │   各自一张卡：接口地址、超时、正文上限，
+└────────────────────────────────────┘   + 该家在该 tab 下的特色项
+```
 
-时间范围（recency）和地区（country）**故意没做**：Tavily 的日期过滤只在 `topic:news` 下生效、`country` 要国家名而非 ISO 码，Exa 与 Firecrawl 又要 ISO/`tbs` 两套写法——语义对不齐，与其造一个“看起来能用”的假旋钮，不如留给需要时再单独加。
+- 每个 tab 顶部是「通用参数」，**改一次该能力下的三家都生效**。
+- 每张 provider 卡片有自己的接口地址、超时、正文上限，以及该家独有的项（Tavily 的 `topic`/`searchDepth`、Exa 的 `searchType`、Firecrawl 的 `version`/`mainContent`/`maxAge`）。
+- 卡片右上角是「使用中」标记；点「设为该工具后端」即切换，下一次调用生效。
+- 不支持的选项按当前后端标 `支持 / 部分支持 / 不支持`。
+- `strict` 打开后，不支持的选项从「发 notice」变成「直接报错」。
 
-抓取侧只有 `fallbackToHttp` / `firecrawlMainContent` 两个总开关（其余厂商能力差异无意义，直接忽略）。
+密钥解析顺序：插件配置里的字面量 → 凭据库 → 环境变量（`TAVILY_API_KEY` / `EXA_API_KEY` / `FIRECRAWL_API_KEY`），每次调用重新解析。**字面量密钥不会被写进状态文件。**
 
-### 输出：一个形状
+## 配置（YAML 也可以）
+
+| 层 | 字段 |
+|---|---|
+| `search` | `backend`、`maxResults`、`depth`(auto/fast/balanced/deep)、`answer`(auto/on/off)、`strict`、`includeDomains`、`excludeDomains` |
+| `fetch` | `backend`、`fallbackToHttp` |
+| `providers.tavily` | `baseURL`、`timeoutMs`、`maxChars`、`topic`、`searchDepth`、`apiKey`、`apiKeyEnv` |
+| `providers.exa` | `baseURL`、`timeoutMs`、`maxChars`、`searchType`、`apiKey`、`apiKeyEnv` |
+| `providers.firecrawl` | `baseURL`、`timeoutMs`、`maxChars`、`version`、`mainContent`、`maxAge`、`apiKey`、`apiKeyEnv` |
+
+设置存在插件自管状态文件（`<profile>/.web-tool-provider/state.json`，回退 `$DSH_HOME`、`~/.dsh`）；YAML 里的 `Config` 只是首次运行的默认值，状态文件优先。
+
+## 输出契约
 
 ```ts
 SearchResult = { content?: string; sources: { url; title?; snippet?; publishedAt? }[]; truncated: boolean }
 FetchResult  = { url: string; statusCode: number; body: { kind: 'text' | 'html'; content: string }; truncated: boolean }
 ```
 
-归一化规则：
-
-- `snippet` 单行、≤400 字；厂商的 `author` 以 ` · 作者` 附在末尾；`highlights` 数组拼成一段。
-- `publishedAt` 一律 `YYYY-MM-DD`（Exa 的 ISO 时间戳、Tavily 的日期、Firecrawl 的 `date` 都收敛到同一格式）。
-- `content` 是「答案 + notices」的拼装：`> provider notice: ...` 行让模型知道哪一项被降级、哪一次抓取退回了本地。
-- 错误码统一：`WEB_PROVIDER_UNAUTHORIZED` / `_QUOTA_EXCEEDED` / `_RATE_LIMITED` / `_BAD_REQUEST` / `_UPSTREAM` / `_UNREACHABLE` / `_EMPTY` / `_CREDENTIAL_MISSING`，外加 `WEB_ABORTED`、`WEB_INVALID_URL`、`WEB_BLOCKED_URL`。上层只按码分支，不用管是哪家。
-
-## 设置页
-
-**Settings → Plugins → 网页工具后端**
-
-1. **后端选择**：`web_search` / `web_fetch` 各选一家。
-2. **统一检索选项**：上面那张表里的旋钮，按当前搜索后端标注「支持 / 部分支持 / 不支持」，不支持的控件直接禁用。
-3. **API 密钥**：三家各一行，保存进 Harness 凭据库（`ctx.credentials`），**不会写进 profile 的 YAML**，也不会落进插件的状态文件。
-
-密钥解析顺序：插件配置里的字面量 → 凭据库 → 环境变量（`TAVILY_API_KEY` / `EXA_API_KEY` / `FIRECRAWL_API_KEY`），每次调用重新解析。
-
-后端与旋钮存在插件自管状态文件（`<profile>/.web-tool-provider/state.json`，回退 `$DSH_HOME`、`~/.dsh`），不走 config editor——否则重载会二次注册路由把插件弄挂。
+- `snippet` 单行、≤400 字；`author` 以 ` · 作者` 附在末尾；`highlights` 数组拼成一段。
+- `publishedAt` 一律 `YYYY-MM-DD`。
+- `content` = 「厂商答案 + notices」；抓取降级也会附 `> provider notice: fell back ...`。
+- 错误码：`WEB_PROVIDER_UNAUTHORIZED` / `_QUOTA_EXCEEDED` / `_RATE_LIMITED` / `_BAD_REQUEST` / `_UPSTREAM` / `_UNREACHABLE` / `_EMPTY` / `_CREDENTIAL_MISSING`、`WEB_ABORTED`、`WEB_INVALID_URL`、`WEB_BLOCKED_URL`。
 
 ## 行为
 
-- **`web_search` 多 query = 多次厂商调用**（工具层并发 fan-out 后按名次合并）。在意额度就调小 `dsh-tool-web` 的 `searchMaxQueries`。
-- **抓取结果一律 `text`**：Firecrawl/Exa/Tavily 已经给 markdown，标成 `html` 会让工具层再转一遍。
-- **抓取降级**：厂商报错/额度/无密钥/空正文/超时 → 本地抓取，并在正文末尾附 `> provider notice: fell back ...: <错误码>`；目标页 4xx 是结果不降级；abort 不降级。
-- **搜索不降级**：选中的后端没配密钥就直接报 `WEB_PROVIDER_CREDENTIAL_MISSING`，提示去设置页。
+- **`web_search` 多 query = 多次厂商调用**（工具层并发 fan-out 后合并）。在意额度就调小 `dsh-tool-web` 的 `searchMaxQueries`。
+- **抓取结果一律 `text`**：三家给的都是 markdown，标成 `html` 会让工具层再转一遍。
+- **抓取降级**：厂商报错/额度/无密钥/空正文/超时 → 本地抓取并附带 notice；目标页 4xx 是结果不降级；abort 不降级。
+- **搜索不降级**：选中的后端没配密钥就报 `WEB_PROVIDER_CREDENTIAL_MISSING`，提示去设置页。
 
 本地抓取只做协议白名单、明文内网/回环地址拦截、逐跳重定向校验与字节上限，**没有**官方 `dsh-web-fetch-http` 的 DNS 解析+公网校验+连接钉扎。要那层保护就关掉 `fallbackToHttp`。
 
@@ -77,9 +76,11 @@ FetchResult  = { url: string; statusCode: number; body: { kind: 'text' | 'html';
 
 ## 开发
 
-- `index.js`：归一化层 + 两个 provider + 两条 Host 路由，零第三方依赖。
-- `client.js`：设置页，`window.__ModuleLoader__` 模块，注册进 `settings.plugins.tab`。
-- `node test/smoke.mjs`：19 项离线测试（三家同形输出、旋钮翻译、notice/strict、错误分类、降级、状态持久化）。
+- `index.js`：分层设置 + 归一化层 + 两个 provider + 两条 Host 路由，零第三方依赖。
+- `client.js`：设置页（两个 tab + 三家卡片），`window.__ModuleLoader__` 模块，注册进 `settings.plugins.tab`。
+- `node test/smoke.mjs`：21 项离线测试（同形输出、旋钮翻译、notice/strict、错误分类、降级开关、分层持久化、密钥隔离）。
+
+> 装完或改完代码需要**重启一次** Harness：模块缓存不会因为重新安装而失效。
 
 ## License
 

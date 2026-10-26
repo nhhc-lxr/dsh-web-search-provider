@@ -1,7 +1,7 @@
 {
   "name": "dsh-web-tool-provider",
-  "version": "0.3.0",
-  "description": "DeepSeek Harness web backend normalization layer: one provider in front of web_search/web_fetch that maps vendor-neutral options to Tavily, Exa and Firecrawl and normalizes their results, notices and error codes.",
+  "version": "0.4.0",
+  "description": "Normalization layer for the Harness web seam: one provider in front of web_search and web_fetch that layers shared options over per-vendor settings for Tavily, Exa and Firecrawl.",
   "type": "module",
   "main": "index.js",
   "exports": {

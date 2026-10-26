@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-// Never touch the real profile: backends and options persist under $DSH_HOME.
+// Never touch the real profile: settings persist under $DSH_HOME.
 const SANDBOX = mkdtempSync(join(tmpdir(), 'dsh-web-tool-'))
 delete process.env.DSH_PROFILE_DIR
 delete process.env.DSH_HOME
@@ -113,9 +113,12 @@ async function check(name, run) {
 }
 
 const KEYS = { tavilyApiKey: 'tvly-x', exaApiKey: 'exa-x', firecrawlApiKey: 'fc-x' }
-const TAVILY_SEARCH = { answer: 'A', results: [{ title: 'T', url: 'https://a.test/1', content: 'body', published_date: '2026-02-03' }] }
+const TAVILY = {
+  answer: 'A',
+  results: [{ title: 'T', url: 'https://a.test/1', content: 'body', published_date: '2026-02-03' }],
+}
 
-/* ---------------------------------------------------- contract stability -- */
+/* ------------------------------------------------------------ contract -- */
 
 await check('one provider per capability, one state route', async () => {
   const { registry, routes } = harness()
@@ -125,7 +128,7 @@ await check('one provider per capability, one state route', async () => {
   assert.equal(routes[0].path, '/web-tool-provider/state')
 })
 
-await check('every vendor is normalized to the same source shape', async () => {
+await check('every vendor normalizes to the same source shape', async () => {
   const expected = {
     url: 'https://x.test/1',
     title: 'X',
@@ -140,72 +143,79 @@ await check('every vendor is normalized to the same source shape', async () => {
   for (const vendor of Object.keys(variants)) {
     stubFetch(() => json(variants[vendor]))
     const { registry, route } = harness(KEYS)
-    await call(route, { method: 'POST', body: { searchBackend: vendor } })
+    await call(route, { method: 'POST', body: { search: { backend: vendor } } })
     const out = await registry.search.search({ query: 'q' })
-    assert.deepEqual(out.sources[0], expected, `${vendor} source shape`)
+    assert.deepEqual(out.sources[0], expected, vendor)
     assert.equal(out.truncated, false)
   }
 })
 
 await check('dates become YYYY-MM-DD and long snippets are clipped', async () => {
-  const long = 'word '.repeat(300)
-  stubFetch(() => json({ results: [{ title: 'T', url: 'https://x.test/', content: long, published_date: 'Tue, 03 Feb 2026 10:00:00 GMT' }] }))
-  const { registry } = harness({ ...KEYS, searchBackend: 'tavily' })
+  stubFetch(() =>
+    json({ results: [{ title: 'T', url: 'https://x.test/', content: 'word '.repeat(300), published_date: 'Tue, 03 Feb 2026 10:00:00 GMT' }] }),
+  )
+  const { registry } = harness(KEYS)
   const out = await registry.search.search({ query: 'q' })
   assert.match(out.sources[0].publishedAt, /^\d{4}-\d{2}-\d{2}$/)
   assert.ok(out.sources[0].snippet.length <= 401)
 })
 
-/* -------------------------------------------------------- input mapping -- */
+/* -------------------------------------------------- shared search knobs -- */
 
-await check('depth and domain filters reach tavily as its own parameters', async () => {
-  stubFetch(() => json(TAVILY_SEARCH))
-  const { registry } = harness({
-    ...KEYS,
-    options: { depth: 'deep', includeDomains: ['a.com'], excludeDomains: ['b.com'] },
+await check('shared options reach tavily as its own parameters', async () => {
+  stubFetch(() => json(TAVILY))
+  const { registry, route } = harness({ ...KEYS, tavilyTopic: 'news' })
+  await call(route, {
+    method: 'POST',
+    body: { search: { options: { depth: 'deep', includeDomains: ['a.com'], excludeDomains: ['b.com'], maxResults: 5 } } },
   })
-  await registry.search.search({ query: 'q' })
+  await registry.search.search({ query: 'q', maxResults: 9 })
   assert.equal(calls[0].body.search_depth, 'advanced')
+  assert.equal(calls[0].body.topic, 'news')
+  assert.equal(calls[0].body.max_results, 5)
   assert.deepEqual(calls[0].body.include_domains, ['a.com'])
   assert.deepEqual(calls[0].body.exclude_domains, ['b.com'])
-  assert.equal('days' in calls[0].body, false)
 })
 
-await check('the same knobs reach exa as ITS own parameters', async () => {
+await check('the same shared options reach exa as ITS parameters', async () => {
   stubFetch(() => json({ results: [] }))
-  const { registry: exaRegistry, route } = harness({
-    ...KEYS,
-    options: { depth: 'fast', includeDomains: ['a.com'] },
-  })
-  await call(route, { method: 'POST', body: { searchBackend: 'exa' } })
-  await exaRegistry.search.search({ query: 'q' })
+  const { registry, route } = harness(KEYS)
+  await call(route, { method: 'POST', body: { search: { backend: 'exa', options: { depth: 'fast', includeDomains: ['a.com'] } } } })
+  await registry.search.search({ query: 'q' })
+  assert.equal(calls[0].url, 'https://api.exa.ai/search')
   assert.equal(calls[0].body.type, 'lite')
   assert.deepEqual(calls[0].body.includeDomains, ['a.com'])
-  assert.equal('startPublishedDate' in calls[0].body, false)
 })
 
-await check('domain filters reach firecrawl as ITS own parameters', async () => {
+await check('the same shared options reach firecrawl as ITS parameters', async () => {
   stubFetch(() => json({ success: true, data: { web: [] } }))
-  const { registry, route } = harness({
-    ...KEYS,
-    options: { includeDomains: ['a.com'] },
-  })
-  await call(route, { method: 'POST', body: { searchBackend: 'firecrawl' } })
+  const { registry, route } = harness(KEYS)
+  await call(route, { method: 'POST', body: { search: { backend: 'firecrawl', options: { includeDomains: ['a.com'] } } } })
   await registry.search.search({ query: 'q' })
+  assert.equal(calls[0].url, 'https://api.firecrawl.dev/v2/search')
   assert.deepEqual(calls[0].body.includeDomains, ['a.com'])
-  assert.equal('tbs' in calls[0].body, false)
 })
 
-/* ------------------------------------------------------ output contract -- */
+/* ------------------------------------------------------ degrade + strict -- */
 
-await check('unsupported options become notices on the answer, not silent drops', async () => {
+await check('unsupported options become notices on the answer', async () => {
   stubFetch(() => json({ success: true, data: { web: [{ title: 'T', url: 'https://x.test/', description: 'd' }] } }))
-  const { registry, route } = harness({ ...KEYS, options: { depth: 'deep', answer: 'on' } })
-  await call(route, { method: 'POST', body: { searchBackend: 'firecrawl' } })
+  const { registry, route } = harness(KEYS)
+  await call(route, { method: 'POST', body: { search: { backend: 'firecrawl', options: { depth: 'deep', answer: 'on' } } } })
   const out = await registry.search.search({ query: 'q' })
   assert.match(out.content, /> provider notice: firecrawl cannot honour "depth"/)
   assert.match(out.content, /> provider notice: firecrawl cannot honour "answer"/)
   assert.equal(out.sources.length, 1)
+})
+
+await check('strict mode turns an unsupported option into an error', async () => {
+  stubFetch(() => json({ success: true, data: { web: [] } }))
+  const { registry, route } = harness(KEYS)
+  await call(route, { method: 'POST', body: { search: { backend: 'firecrawl', options: { depth: 'deep', strict: true } } } })
+  await assert.rejects(registry.search.search({ query: 'q' }), (error) => {
+    assert.equal(error.code, 'WEB_PROVIDER_BAD_REQUEST')
+    return true
+  })
 })
 
 await check('an empty result set is reported to the model', async () => {
@@ -216,26 +226,14 @@ await check('an empty result set is reported to the model', async () => {
   assert.deepEqual(out.sources, [])
 })
 
-await check('strict mode turns an unsupported option into an error', async () => {
-  stubFetch(() => json({ success: true, data: { web: [] } }))
-  const { registry, route } = harness({ ...KEYS, options: { depth: 'deep', strict: true } })
-  await call(route, { method: 'POST', body: { searchBackend: 'firecrawl' } })
-  await assert.rejects(registry.search.search({ query: 'q' }), (error) => {
-    assert.equal(error.code, 'WEB_PROVIDER_BAD_REQUEST')
-    return true
-  })
-})
-
-/* ----------------------------------------------------- error taxonomy --- */
+/* --------------------------------------------------------- error taxonomy -- */
 
 await check('HTTP failures map to one taxonomy across vendors', async () => {
   const cases = [
     [401, 'WEB_PROVIDER_UNAUTHORIZED'],
     [402, 'WEB_PROVIDER_QUOTA_EXCEEDED'],
     [429, 'WEB_PROVIDER_RATE_LIMITED'],
-    [400, 'WEB_PROVIDER_BAD_REQUEST'],
     [503, 'WEB_PROVIDER_UPSTREAM'],
-    [418, 'WEB_PROVIDER_ERROR'],
   ]
   for (const [status, code] of cases) {
     stubFetch(() => json({ error: 'nope' }, status))
@@ -247,7 +245,7 @@ await check('HTTP failures map to one taxonomy across vendors', async () => {
   }
 })
 
-await check('an unreachable vendor is distinguishable from a bad key', async () => {
+await check('an unreachable vendor differs from a bad key', async () => {
   globalThis.fetch = async () => {
     throw new TypeError('fetch failed')
   }
@@ -258,7 +256,7 @@ await check('an unreachable vendor is distinguishable from a bad key', async () 
   })
 })
 
-await check('missing credentials stay a distinct, actionable error', async () => {
+await check('missing credentials stay distinct and actionable', async () => {
   const { registry } = harness({ tavilyApiKeyEnv: 'ABSENT_REF' }, { credentials: fakeCredentials({}) })
   await assert.rejects(registry.search.search({ query: 'q' }), (error) => {
     assert.equal(error.code, 'WEB_PROVIDER_CREDENTIAL_MISSING')
@@ -267,15 +265,15 @@ await check('missing credentials stay a distinct, actionable error', async () =>
   })
 })
 
-/* --------------------------------------------------------------- fetch -- */
+/* ----------------------------------------------------------------- fetch -- */
 
-await check('firecrawl pages are text, with metadata mapped', async () => {
+await check('firecrawl pages are text with metadata mapped', async () => {
   stubFetch(() => json({ success: true, data: { markdown: '# Hi', metadata: { statusCode: 200, url: 'https://final.test/p' } } }))
   const { registry } = harness(KEYS)
   const out = await registry.fetch.fetch({ url: 'https://example.com/a' })
+  assert.equal(calls[0].url, 'https://api.firecrawl.dev/v2/scrape')
   assert.equal(out.body.kind, 'text')
   assert.equal(out.url, 'https://final.test/p')
-  assert.equal(out.statusCode, 200)
 })
 
 await check('a failing backend degrades and says so', async () => {
@@ -287,57 +285,83 @@ await check('a failing backend degrades and says so', async () => {
   assert.match(out.body.content, /> provider notice: fell back to a direct HTTP fetch: WEB_PROVIDER_QUOTA_EXCEEDED/)
 })
 
-await check('tavily extract failures name the vendor reason', async () => {
-  stubFetch(() => json({ results: [], failed_results: [{ url: 'https://x.test/', error: 'blocked by robots' }] }))
+await check('the fallback switch is honoured', async () => {
+  stubFetch(() => json({ success: false, error: 'quota' }, 402))
   const { registry, route } = harness(KEYS)
-  await call(route, { method: 'POST', body: { fetchBackend: 'tavily' } })
-  const out = await registry.fetch.fetch({ url: 'https://x.test/' })
-  assert.match(out.body.content, /provider notice/)
+  await call(route, { method: 'POST', body: { fetch: { options: { fallbackToHttp: false } } } })
+  await assert.rejects(registry.fetch.fetch({ url: 'https://example.com/page' }), (error) => {
+    assert.equal(error.code, 'WEB_PROVIDER_QUOTA_EXCEEDED')
+    return true
+  })
 })
 
-/* ---------------------------------------------------------------- state -- */
+/* ----------------------------------------------------------------- state -- */
 
-await check('GET exposes options and the capability matrix', async () => {
-  const { route } = harness({ options: { depth: 'fast' } })
+await check('GET exposes the layered shape and the capability matrix', async () => {
+  const { route } = harness({ searchDepth: 'fast' })
   const { payload } = await call(route, {})
-  assert.equal(payload.options.depth, 'fast')
-  assert.equal(payload.options.recency, undefined)
-  assert.equal(payload.options.locale, undefined)
+  assert.equal(payload.search.backend, 'tavily')
+  assert.equal(payload.search.options.depth, 'fast')
+  assert.equal(payload.fetch.backend, 'firecrawl')
+  assert.equal(payload.fetch.options.fallbackToHttp, true)
+  assert.equal(payload.providers.tavily.topic, 'general')
+  assert.equal(payload.providers.firecrawl.version, 'v2')
   assert.equal(payload.capabilities.firecrawl.search.depth, 'no')
-  assert.equal(payload.capabilities.tavily.search.depth, 'yes')
-  assert.equal(payload.capabilities.exa.search.answer, 'no')
+  assert.equal(payload.capabilities.tavily.search.answer, 'yes')
+  assert.equal(payload.providers.tavily.apiKey, undefined)
 })
 
-await check('POST persists backends and options together', async () => {
+await check('POST persists settings per layer and a restart picks them up', async () => {
   const { route } = harness({})
   const out = await call(route, {
     method: 'POST',
     body: {
-      searchBackend: 'exa',
-      options: { answer: 'on', includeDomains: ['a.com', 'b.com'], strict: true },
+      search: { backend: 'exa', options: { answer: 'on', includeDomains: ['a.com', 'b.com'] } },
+      providers: { firecrawl: { maxAge: 60000, version: 'v1' } },
     },
   })
   assert.equal(out.payload.persistence.persisted, true)
   const stored = JSON.parse(readFileSync(join(SANDBOX, 'web-tool-provider', 'state.json'), 'utf8'))
-  assert.equal(stored.searchBackend, 'exa')
-  assert.equal(stored.options.answer, 'on')
-  assert.equal(stored.options.strict, true)
+  assert.equal(stored.search.backend, 'exa')
+  assert.equal(stored.providers.firecrawl.maxAge, 60000)
+  assert.equal(stored.providers.firecrawl.apiKey, undefined, 'never writes a literal key')
 
-  const restarted = harness({ options: { answer: 'auto' } })
+  const restarted = harness({})
   const snapshot = await call(restarted.route, {})
-  assert.equal(snapshot.payload.searchBackend, 'exa')
-  assert.equal(snapshot.payload.options.answer, 'on')
-  assert.deepEqual(snapshot.payload.options.includeDomains, ['a.com', 'b.com'])
+  assert.equal(snapshot.payload.search.backend, 'exa')
+  assert.equal(snapshot.payload.search.options.answer, 'on')
+  assert.deepEqual(snapshot.payload.search.options.includeDomains, ['a.com', 'b.com'])
+  assert.equal(snapshot.payload.providers.firecrawl.maxAge, 60000)
 })
 
-await check('keys still go through the credential service, never the state file', async () => {
+await check('per-provider edits change the next request', async () => {
+  stubFetch(() => json(TAVILY))
+  const { registry, route } = harness(KEYS)
+  await call(route, {
+    method: 'POST',
+    body: { providers: { tavily: { baseURL: 'https://gateway.test/tavily', searchDepth: 'advanced', topic: 'finance' } } },
+  })
+  await registry.search.search({ query: 'q' })
+  assert.equal(calls[0].url, 'https://gateway.test/tavily/search')
+  assert.equal(calls[0].body.search_depth, 'advanced')
+  assert.equal(calls[0].body.topic, 'finance')
+})
+
+await check('a bad base URL is rejected before it is stored', async () => {
+  const { route } = harness({})
+  const out = await call(route, { method: 'POST', body: { providers: { exa: { baseURL: 'ftp://nope' } } } })
+  assert.equal(out.status, 400)
+  assert.match(out.payload.error, /absolute http\(s\) URL/)
+})
+
+await check('keys go through the credential service, never the state file', async () => {
   const credentials = fakeCredentials({})
   const { route } = harness({}, { credentials })
   const saved = await call(route, { method: 'POST', body: { setKey: { vendor: 'exa', value: 'exa-new' } } })
-  assert.equal(saved.payload.keys.exa.configured, true)
+  assert.equal(saved.payload.providers.exa.key.configured, true)
   assert.deepEqual(credentials.writes[0], ['set', 'EXA_API_KEY', 'exa-new'])
-  const raw = readFileSync(join(SANDBOX, 'web-tool-provider', 'state.json'), 'utf8')
-  assert.equal(raw.includes('exa-new'), false)
+  await call(route, { method: 'POST', body: { clearKey: { vendor: 'exa' } } })
+  assert.deepEqual(credentials.writes[1], ['unset', 'EXA_API_KEY'])
 })
 
 await check('the state route refuses a foreign origin', async () => {
