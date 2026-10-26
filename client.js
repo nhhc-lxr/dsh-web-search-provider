@@ -275,7 +275,7 @@ window.__ModuleLoader__.load({
             setError('')
             setState((current) =>
               current
-                ? { ...current, keys: payload.keys || current.keys, stateFile: payload.stateFile || current.stateFile }
+                ? { ...current, keys: payload.keys || current.keys }
                 : current,
             )
             if (payload.persistence && payload.persistence.persisted === false) {
@@ -460,7 +460,6 @@ window.__ModuleLoader__.load({
         h('div', { style: styles.card }, h('h3', { style: styles.cardTitle }, t('keys')), keyRows),
         notice === '' ? null : h('p', { style: styles.ok }, notice),
         error === '' ? null : h('p', { style: styles.error }, error),
-        state.stateFile ? h('p', { style: styles.note }, state.stateFile) : null,
       )
     }
 
