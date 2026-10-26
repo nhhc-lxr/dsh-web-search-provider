@@ -6,6 +6,8 @@ window.__ModuleLoader__.load({
 
     const ENDPOINT = '/web-tool-provider/state'
     const VENDORS = ['tavily', 'exa', 'firecrawl']
+    const LABELS = { tavily: 'Tavily', exa: 'Exa', firecrawl: 'Firecrawl' }
+    const labelOf = (vendor) => LABELS[vendor] || vendor
     const TOPICS = ['general', 'news', 'finance']
     const TYPES = ['auto', 'lite', 'deep']
     const VERSIONS = ['v2', 'v1']
@@ -330,7 +332,7 @@ window.__ModuleLoader__.load({
         setState(next)
       }
 
-      const optionTag = (value) => h('option', { key: value, value }, t(value))
+      const optionTag = (value) => h('option', { key: value, value }, LABELS[value] || t(value))
 
       const numericRow = (label, value, onInput) =>
         h(
@@ -540,7 +542,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: styles.cardHead },
-            h('span', { style: styles.vendorName }, vendor),
+            h('span', { style: styles.vendorName }, labelOf(vendor)),
             keyBadge(t, provider.key),
             isActive ? h('span', { style: badgeStyle('yes') }, t('active')) : null,
             isActive
@@ -583,7 +585,7 @@ window.__ModuleLoader__.load({
         return h(
           'div',
           { key: vendor, style: styles.row },
-          h('span', { style: styles.vendorName }, vendor),
+          h('span', { style: styles.vendorName }, labelOf(vendor)),
           keyBadge(t, key),
           h('input', {
             style: styles.input,
