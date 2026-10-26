@@ -6,59 +6,116 @@ window.__ModuleLoader__.load({
 
     const ENDPOINT = '/web-tool-provider/state'
     const VENDORS = ['tavily', 'exa', 'firecrawl']
+    const RECENCY = ['any', 'day', 'week', 'month', 'year']
+    const DEPTH = ['auto', 'fast', 'balanced', 'deep']
+    const ANSWER = ['auto', 'on', 'off']
 
     const DICT = {
       en: {
         tab: 'Web tools',
         title: 'Web tool provider',
         subtitle:
-          'Choose which backend answers web_search and web_fetch. Keys are stored by the harness credential store, never in the profile YAML.',
+          'One provider in front of web_search and web_fetch. Pick the backend, tune the shared options once, and keep keys in the harness credential store.',
+        backendsTitle: 'Backends',
         searchBackend: 'web_search backend',
         fetchBackend: 'web_fetch backend',
-        backendsTitle: 'Backends',
         saveBackends: 'Save backends',
+        optionsTitle: 'Shared search options',
+        optionsHint:
+          'These are vendor-neutral. Each backend honours what it can; the rest is reported to the model as a notice instead of changing behaviour silently.',
+        recency: 'Recency',
+        depth: 'Search depth',
+        answer: 'Synthesized answer',
+        locale: 'Country / locale',
+        includeDomains: 'Only these domains',
+        excludeDomains: 'Exclude these domains',
+        strict: 'Strict mode — fail instead of ignoring an unsupported option',
+        saveOptions: 'Save options',
         keys: 'API keys',
         configured: 'configured',
         fromEnv: 'from environment',
         fromConfig: 'from plugin config',
         missing: 'not configured',
+        supported: 'supported',
+        partial: 'partial',
+        unsupported: 'unsupported',
         save: 'Save',
         clear: 'Clear',
         saved: 'Saved',
         cleared: 'Cleared',
-        savedLocalOnly: 'Applied now, but not persisted: ',
+        localOnly: 'Applied now, but not persisted: ',
         fallbackOn: 'web_fetch falls back to a credential-free local fetch when the backend fails.',
         fallbackOff: 'web_fetch has no fallback: a backend failure is returned to the model.',
         loading: 'Loading…',
         loadFailed: 'Could not read the plugin state: ',
         keyPlaceholder: 'Paste the key',
         perCall: 'Applies to the next call — no restart needed.',
+        domainsPlaceholder: 'a.com, b.com',
+        localePlaceholder: 'US',
+        auto: 'auto (vendor default)',
+        any: 'any',
+        day: 'past 24 hours',
+        week: 'past week',
+        month: 'past month',
+        year: 'past year',
+        fast: 'fast',
+        balanced: 'balanced',
+        deep: 'deep (costs more)',
+        on: 'on',
+        off: 'off',
       },
       zh: {
         tab: '网页工具',
         title: '网页工具后端',
-        subtitle: '选择 web_search 与 web_fetch 走哪个后端。密钥存在 Harness 凭据库里，不写进 profile 的 YAML。',
+        subtitle:
+          'web_search 与 web_fetch 共用的一个 provider。选后端、统一调检索选项、密钥放 Harness 凭据库。',
+        backendsTitle: '后端选择',
         searchBackend: 'web_search 后端',
         fetchBackend: 'web_fetch 后端',
-        backendsTitle: '后端选择',
         saveBackends: '保存后端',
+        optionsTitle: '统一检索选项',
+        optionsHint:
+          '这些是厂商无关的语义选项。后端能做就做，做不到的会以 notice 形式告知模型，而不是悄悄改行为。',
+        recency: '时间范围',
+        depth: '检索深度',
+        answer: '合成答案',
+        locale: '国家 / 地区',
+        includeDomains: '只搜这些域名',
+        excludeDomains: '排除这些域名',
+        strict: '严格模式——不支持的选项直接报错，而不是忽略',
+        saveOptions: '保存选项',
         keys: 'API 密钥',
         configured: '已配置',
         fromEnv: '来自环境变量',
         fromConfig: '来自插件配置',
         missing: '未配置',
+        supported: '支持',
+        partial: '部分支持',
+        unsupported: '不支持',
         save: '保存',
         clear: '清除',
         saved: '已保存',
         cleared: '已清除',
-        savedLocalOnly: '已生效，但未能持久化：',
+        localOnly: '已生效，但未能持久化：',
         fallbackOn: '后端失败时，web_fetch 会退回无需密钥的本地抓取。',
         fallbackOff: 'web_fetch 没有降级：后端失败会直接返回给模型。',
         loading: '加载中…',
         loadFailed: '读取插件状态失败：',
-        loadingFailed: '读取插件状态失败：',
         keyPlaceholder: '粘贴密钥',
         perCall: '下一次调用即生效，不用重启。',
+        domainsPlaceholder: 'a.com, b.com',
+        localePlaceholder: 'US',
+        auto: '自动（厂商默认）',
+        any: '不限',
+        day: '24 小时内',
+        week: '一周内',
+        month: '一个月内',
+        year: '一年内',
+        fast: '快',
+        balanced: '均衡',
+        deep: '深度（更贵）',
+        on: '开启',
+        off: '关闭',
       },
     }
 
@@ -92,7 +149,7 @@ window.__ModuleLoader__.load({
     }
 
     const styles = {
-      page: { padding: '4px 0 24px', maxWidth: 720, color: 'var(--dsw-alias-label-primary)' },
+      page: { padding: '4px 0 24px', maxWidth: 760, color: 'var(--dsw-alias-label-primary)' },
       title: { margin: '0 0 6px', fontSize: 15, fontWeight: 600 },
       subtitle: { margin: '0 0 18px', fontSize: 12, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)' },
       card: {
@@ -149,7 +206,13 @@ window.__ModuleLoader__.load({
       },
       keyRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' },
       vendor: { fontSize: 12, fontWeight: 600, minWidth: 78 },
-      badge: { fontSize: 11, padding: '2px 7px', borderRadius: 999, border: '1px solid currentColor', whiteSpace: 'nowrap' },
+      badge: {
+        fontSize: 11,
+        padding: '2px 7px',
+        borderRadius: 999,
+        border: '1px solid currentColor',
+        whiteSpace: 'nowrap',
+      },
       note: { margin: '10px 0 0', fontSize: 11, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)' },
       error: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' },
       ok: { fontSize: 12, color: 'var(--dsw-alias-state-success-primary)' },
@@ -172,16 +235,24 @@ window.__ModuleLoader__.load({
       return payload
     }
 
-    function badge(t, info) {
-      const configured = info && info.configured
-      const source = info && info.source
-      let label = configured ? t('configured') : t('missing')
-      if (configured && source === 'env') label = `${t('configured')} · ${t('fromEnv')}`
-      else if (configured && source === 'config') label = `${t('configured')} · ${t('fromConfig')}`
-      const color = configured
-        ? 'var(--dsw-alias-state-success-primary)'
-        : 'var(--dsw-alias-state-warn-primary)'
-      return h('span', { style: { ...styles.badge, color } }, label)
+    const joinDomains = (value) => (Array.isArray(value) ? value.join(', ') : '')
+    const splitDomains = (value) =>
+      String(value)
+        .split(/[\s,]+/)
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+
+    function supportOf(capabilities, backend, capability) {
+      const table = capabilities && capabilities[backend]
+      const search = table && table.search
+      const value = search && search[capability]
+      return typeof value === 'string' ? value : 'yes'
+    }
+
+    function badgeStyle(kind) {
+      if (kind === 'no') return { ...styles.badge, color: 'var(--dsw-alias-state-error-primary)' }
+      if (kind === 'partial') return { ...styles.badge, color: 'var(--dsw-alias-state-warn-primary)' }
+      return { ...styles.badge, color: 'var(--dsw-alias-state-success-primary)' }
     }
 
     function ProviderPage() {
@@ -214,11 +285,13 @@ window.__ModuleLoader__.load({
             setState(payload)
             setError('')
             if (payload && payload.persistence && payload.persistence.persisted === false) {
-              setNotice(`${t('savedLocalOnly')}${payload.persistence.reason || ''}`)
+              setNotice(`${t('localOnly')}${payload.persistence.reason || ''}`)
             } else {
               setNotice(t(kind))
             }
-            if (kind === 'saved') setDraftKeys((current) => ({ ...current, ...(body.setKey ? { [body.setKey.vendor]: '' } : {}) }))
+            if (kind === 'saved' && body.setKey) {
+              setDraftKeys((current) => ({ ...current, [body.setKey.vendor]: '' }))
+            }
           } catch (cause) {
             setError(String(cause && cause.message ? cause.message : cause))
           } finally {
@@ -236,8 +309,21 @@ window.__ModuleLoader__.load({
       }
 
       const backends = Array.isArray(state.backends) && state.backends.length > 0 ? state.backends : VENDORS
-      const option = (value) => h('option', { key: value, value }, value)
-      const selects = h(
+      const options = state.options || {}
+      const capabilities = state.capabilities || {}
+      const backend = state.searchBackend
+
+      const optionTag = (value, key) => h('option', { key: value + key, value }, t(value) === value ? value : t(value))
+
+      const supportTag = (capability) => {
+        const kind = supportOf(capabilities, backend, capability)
+        const text = kind === 'no' ? t('unsupported') : kind === 'partial' ? t('partial') : t('supported')
+        return h('span', { style: badgeStyle(kind) }, text)
+      }
+
+      const setOption = (patch) => setState({ ...state, options: { ...options, ...patch } })
+
+      const backendsCard = h(
         'div',
         { style: styles.card },
         h('h3', { style: styles.cardTitle }, t('backendsTitle')),
@@ -253,7 +339,7 @@ window.__ModuleLoader__.load({
               disabled: busy,
               onChange: (event) => setState({ ...state, searchBackend: event.target.value }),
             },
-            backends.map(option),
+            backends.map((value) => optionTag(value, 'search')),
           ),
         ),
         h(
@@ -268,7 +354,7 @@ window.__ModuleLoader__.load({
               disabled: busy,
               onChange: (event) => setState({ ...state, fetchBackend: event.target.value }),
             },
-            backends.map(option),
+            backends.map((value) => optionTag(value, 'fetch')),
           ),
         ),
         h(
@@ -288,14 +374,167 @@ window.__ModuleLoader__.load({
         ),
       )
 
+      const optionsCard = h(
+        'div',
+        { style: styles.card },
+        h('h3', { style: styles.cardTitle }, t('optionsTitle')),
+        h('p', { style: styles.note }, t('optionsHint')),
+
+        h(
+          'div',
+          { style: styles.row },
+          h('span', { style: styles.label }, t('recency')),
+          h(
+            'select',
+            {
+              style: styles.select,
+              value: options.recency || 'any',
+              disabled: busy || supportOf(capabilities, backend, 'recency') === 'no',
+              onChange: (event) => setOption({ recency: event.target.value }),
+            },
+            RECENCY.map((value) => optionTag(value, 'recency')),
+          ),
+          supportTag('recency'),
+        ),
+
+        h(
+          'div',
+          { style: styles.row },
+          h('span', { style: styles.label }, t('depth')),
+          h(
+            'select',
+            {
+              style: styles.select,
+              value: options.depth || 'auto',
+              disabled: busy || supportOf(capabilities, backend, 'depth') === 'no',
+              onChange: (event) => setOption({ depth: event.target.value }),
+            },
+            DEPTH.map((value) => optionTag(value, 'depth')),
+          ),
+          supportTag('depth'),
+        ),
+
+        h(
+          'div',
+          { style: styles.row },
+          h('span', { style: styles.label }, t('answer')),
+          h(
+            'select',
+            {
+              style: styles.select,
+              value: options.answer || 'auto',
+              disabled: busy || supportOf(capabilities, backend, 'answer') === 'no',
+              onChange: (event) => setOption({ answer: event.target.value }),
+            },
+            ANSWER.map((value) => optionTag(value, 'answer')),
+          ),
+          supportTag('answer'),
+        ),
+
+        h(
+          'div',
+          { style: styles.row },
+          h('span', { style: styles.label }, t('locale')),
+          h('input', {
+            style: styles.input,
+            type: 'text',
+            placeholder: t('localePlaceholder'),
+            value: options.locale || '',
+            disabled: busy || supportOf(capabilities, backend, 'locale') === 'no',
+            onChange: (event) => setOption({ locale: event.target.value }),
+          }),
+          supportTag('locale'),
+        ),
+
+        h(
+          'div',
+          { style: styles.row },
+          h('span', { style: styles.label }, t('includeDomains')),
+          h('input', {
+            style: styles.input,
+            type: 'text',
+            placeholder: t('domainsPlaceholder'),
+            value: joinDomains(options.includeDomains),
+            disabled: busy || supportOf(capabilities, backend, 'domains') === 'no',
+            onChange: (event) => setOption({ includeDomains: splitDomains(event.target.value) }),
+          }),
+          supportTag('domains'),
+        ),
+
+        h(
+          'div',
+          { style: styles.row },
+          h('span', { style: styles.label }, t('excludeDomains')),
+          h('input', {
+            style: styles.input,
+            type: 'text',
+            placeholder: t('domainsPlaceholder'),
+            value: joinDomains(options.excludeDomains),
+            disabled: busy || supportOf(capabilities, backend, 'domains') === 'no',
+            onChange: (event) => setOption({ excludeDomains: splitDomains(event.target.value) }),
+          }),
+        ),
+
+        h(
+          'div',
+          { style: styles.row },
+          h('span', { style: styles.label }, ''),
+          h(
+            'label',
+            { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 } },
+            h('input', {
+              type: 'checkbox',
+              checked: Boolean(options.strict),
+              disabled: busy,
+              onChange: (event) => setOption({ strict: event.target.checked }),
+            }),
+            t('strict'),
+          ),
+        ),
+
+        h(
+          'div',
+          { style: styles.row },
+          h('span', { style: styles.label }, ''),
+          h(
+            'button',
+            {
+              style: styles.primary,
+              disabled: busy,
+              onClick: () =>
+                apply(
+                  {
+                    options: {
+                      recency: options.recency,
+                      depth: options.depth,
+                      answer: options.answer,
+                      locale: options.locale,
+                      includeDomains: options.includeDomains,
+                      excludeDomains: options.excludeDomains,
+                      strict: options.strict,
+                    },
+                  },
+                  'saved',
+                ),
+            },
+            t('saveOptions'),
+          ),
+        ),
+      )
+
       const keyRows = VENDORS.map((vendor) => {
         const info = (state.keys && state.keys[vendor]) || {}
         const draft = draftKeys[vendor] === undefined ? '' : draftKeys[vendor]
+        const configured = info.configured
+        const source = info.source
+        let label = configured ? t('configured') : t('missing')
+        if (configured && source === 'env') label = `${t('configured')} · ${t('fromEnv')}`
+        else if (configured && source === 'config') label = `${t('configured')} · ${t('fromConfig')}`
         return h(
           'div',
           { key: vendor, style: styles.keyRow },
           h('span', { style: styles.vendor }, vendor),
-          badge(t, info),
+          h('span', { style: badgeStyle(configured ? 'yes' : 'no') }, label),
           h('input', {
             style: styles.input,
             type: 'password',
@@ -332,7 +571,8 @@ window.__ModuleLoader__.load({
         { style: styles.page },
         h('h2', { style: styles.title }, t('title')),
         h('p', { style: styles.subtitle }, t('subtitle')),
-        selects,
+        backendsCard,
+        optionsCard,
         h(
           'div',
           { style: styles.card },
@@ -340,6 +580,7 @@ window.__ModuleLoader__.load({
           keyRows,
           h('p', { style: styles.note }, state.fallbackToHttp ? t('fallbackOn') : t('fallbackOff')),
           h('p', { style: styles.note }, t('perCall')),
+          state.stateFile ? h('p', { style: styles.note }, state.stateFile) : null,
         ),
         notice === '' ? null : h('p', { style: styles.ok }, notice),
         error === '' ? null : h('p', { style: styles.error }, error),

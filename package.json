@@ -1,7 +1,7 @@
 {
   "name": "dsh-web-tool-provider",
-  "version": "0.2.0",
-  "description": "Tavily, Exa and Firecrawl as interchangeable ctx.web backends for DeepSeek Harness — pick the engine behind web_search and web_fetch from a settings page, with keys in the harness credential store and a credential-free local fetch fallback.",
+  "version": "0.3.0",
+  "description": "DeepSeek Harness web backend normalization layer: one provider in front of web_search/web_fetch that maps vendor-neutral options to Tavily, Exa and Firecrawl and normalizes their results, notices and error codes.",
   "type": "module",
   "main": "index.js",
   "exports": {

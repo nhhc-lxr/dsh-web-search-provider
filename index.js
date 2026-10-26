@@ -1,29 +1,29 @@
 /**
- * dsh-web-tool-provider
+ * dsh-web-tool-provider — the normalization layer between the Harness web seam
+ * and three vendor APIs.
  *
- * One `ctx.web` provider per capability, each dispatching to a selectable
- * backend:
+ *   web_search -> ctx.web.search() -> [ unified request ]  -> tavily | exa | firecrawl
+ *   web_fetch  -> ctx.web.fetch()  -> [ unified request ]  -> tavily | exa | firecrawl
  *
- *   web_search  ->  ctx.web.search()  ->  [ tavily | exa | firecrawl ]
- *   web_fetch   ->  ctx.web.fetch()   ->  [ tavily | exa | firecrawl ]  (+ local fallback)
+ * Two contracts are normalized here and nowhere else:
  *
- * The model-facing tools stay owned by `dsh-tool-web`: names, schemas, prompt
- * guidance, multi-query fan-out and result rendering never change. Only the
- * engine behind them does.
+ *   INPUT   semantic knobs (recency / domains / locale / depth / answer) instead
+ *           of vendor parameters. Each adapter translates what the vendor can
+ *           honour and reports what it dropped as a notice, never silently.
+ *   OUTPUT  one source shape and one document shape for every vendor, one date
+ *           format, one error taxonomy, and vendor warnings folded into the
+ *           answer text so the model learns about degradation.
  *
- * Which backend runs is decided per call from `state`, which the settings page
- * updates through two Host routes:
+ * The model-facing tools stay owned by `dsh-tool-web`; their schema cannot grow
+ * a provider argument, which is exactly why the knobs live in config and the
+ * settings page instead of in the tool call.
  *
- *   GET  /web-tool-provider/state   -> backends + per-vendor credential state
- *   POST /web-tool-provider/state   -> switch backends, store or clear keys
+ * Settings page talks to two Host routes:
+ *   GET  /web-tool-provider/state  -> backends, options, capabilities, key state
+ *   POST /web-tool-provider/state  -> switch backends, edit options, store keys
  *
- * Backend choice persists in a small plugin-owned JSON file under `$DSH_HOME`
- * (never through the config editor: re-applying the profile re-mounts this row
- * and a second `webServer.register` for the same path is a hard error). Keys
- * persist through `credentials` and are never written to disk by this plugin.
- *
- * No package imports: plain JS on Node's global fetch and builtins, so the
- * bundle survives Harness version drift and needs no install script.
+ * Backend choice and options persist in a plugin-owned JSON file; keys persist
+ * in `ctx.credentials` and never reach this file.
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
@@ -47,6 +47,10 @@ const FIRECRAWL_DEFAULT_BASE = 'https://api.firecrawl.dev'
 const MAX_TIMER_MS = 2147483647
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
 const BODY_LIMIT_BYTES = 64 * 1024
+const SNIPPET_CHARS = 400
+const RECENCY_DAYS = { day: 1, week: 7, month: 30, year: 365 }
+const DEPTH_VALUES = ['auto', 'fast', 'balanced', 'deep']
+const RECENCY_VALUES = ['any', 'day', 'week', 'month', 'year']
 
 export const name = PLUGIN
 export const inject = ['web', 'webServer']
@@ -62,6 +66,40 @@ class ProviderError extends Error {
 }
 
 const providerError = (message, code) => new ProviderError(message, code)
+
+/**
+ * One taxonomy for every vendor: HTTP status and transport failures become the
+ * same codes whichever backend produced them, so callers never branch on vendor.
+ */
+function classifyFailure(vendor, status, bodyText) {
+  const detail = clip(String(bodyText ?? '').replace(/\s+/g, ' '), 240)
+  const tail = detail === '' ? '' : ` — ${detail}`
+  if (status === 401 || status === 403) {
+    return providerError(`${vendor} rejected the API key (HTTP ${status})${tail}`, 'WEB_PROVIDER_UNAUTHORIZED')
+  }
+  if (status === 402) {
+    return providerError(`${vendor} is out of credits (HTTP 402)${tail}`, 'WEB_PROVIDER_QUOTA_EXCEEDED')
+  }
+  if (status === 429) {
+    return providerError(`${vendor} rate-limited the request (HTTP 429)${tail}`, 'WEB_PROVIDER_RATE_LIMITED')
+  }
+  if (status === 400 || status === 422) {
+    return providerError(`${vendor} rejected the request (HTTP ${status})${tail}`, 'WEB_PROVIDER_BAD_REQUEST')
+  }
+  if (status >= 500) {
+    return providerError(`${vendor} failed upstream (HTTP ${status})${tail}`, 'WEB_PROVIDER_UPSTREAM')
+  }
+  return providerError(`${vendor} failed with HTTP ${status}${tail}`, 'WEB_PROVIDER_ERROR')
+}
+
+const transportFailure = (vendor, cause, timedOut, timeoutMs) => {
+  if (timedOut) return providerError(`${vendor} timed out after ${timeoutMs}ms`, 'WEB_FETCH_TIMEOUT')
+  const message = cause?.message ?? String(cause)
+  if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN|certificate|socket hang up/i.test(message)) {
+    return providerError(`${vendor} is unreachable: ${message}`, 'WEB_PROVIDER_UNREACHABLE')
+  }
+  return providerError(`${vendor} failed: ${message}`, 'WEB_PROVIDER_ERROR')
+}
 
 /* ------------------------------------------------------------------ config -- */
 
@@ -79,9 +117,35 @@ const booleanOr = (value, fallback) => (typeof value === 'boolean' ? value : fal
 
 const stripTrailingSlash = (value) => value.replace(/\/+$/, '')
 
-const backendOr = (value, fallback) => {
+const oneOf = (value, allowed, fallback) => {
   const candidate = text(value).toLowerCase()
-  return BACKENDS.includes(candidate) ? candidate : fallback
+  return allowed.includes(candidate) ? candidate : fallback
+}
+
+const backendOr = (value, fallback) => oneOf(value, BACKENDS, fallback)
+
+/** `"a.com, b.com"` or `["a.com"]` -> `["a.com","b.com"]`. */
+function domainList(value) {
+  const parts = Array.isArray(value) ? value : text(value).split(/[\s,]+/)
+  const seen = new Set()
+  for (const part of parts) {
+    const host = text(part).replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase()
+    if (host !== '') seen.add(host)
+  }
+  return [...seen]
+}
+
+function normalizeOptions(input) {
+  const source = input && typeof input === 'object' ? input : {}
+  return {
+    recency: oneOf(source.recency, RECENCY_VALUES, 'any'),
+    depth: oneOf(source.depth, DEPTH_VALUES, 'auto'),
+    answer: oneOf(source.answer === true ? 'on' : source.answer === false ? 'off' : source.answer, ['auto', 'on', 'off'], 'auto'),
+    locale: text(source.locale),
+    includeDomains: domainList(source.includeDomains),
+    excludeDomains: domainList(source.excludeDomains),
+    strict: booleanOr(source.strict, false),
+  }
 }
 
 function resolveConfig(raw) {
@@ -89,15 +153,14 @@ function resolveConfig(raw) {
   const config = {
     searchBackend: backendOr(input.searchBackend, DEFAULT_SEARCH),
     fetchBackend: backendOr(input.fetchBackend, DEFAULT_FETCH),
-    searchProviderId: text(input.searchProviderId) || PROVIDER_ID,
-    fetchProviderId: text(input.fetchProviderId) || PROVIDER_ID,
+    providerId: text(input.providerId) || PROVIDER_ID,
+    options: normalizeOptions(input.options),
 
     tavilyApiKey: text(input.tavilyApiKey),
     tavilyApiKeyEnv: text(input.tavilyApiKeyEnv) || CREDENTIAL_REF.tavily,
     tavilyBaseURL: stripTrailingSlash(text(input.tavilyBaseURL) || TAVILY_DEFAULT_BASE),
     tavilySearchDepth: text(input.tavilySearchDepth) || 'basic',
     tavilyTopic: text(input.tavilyTopic) || 'general',
-    tavilyIncludeAnswer: booleanOr(input.tavilyIncludeAnswer, true),
     tavilyMaxResults: integerOr(input.tavilyMaxResults, 8, 1, 20),
     tavilyTimeoutMs: integerOr(input.tavilyTimeoutMs, 20000, 1000, MAX_TIMER_MS),
     tavilyMaxChars: integerOr(input.tavilyMaxChars, 100000, 1000, 5000000),
@@ -114,18 +177,17 @@ function resolveConfig(raw) {
     firecrawlApiKeyEnv: text(input.firecrawlApiKeyEnv) || CREDENTIAL_REF.firecrawl,
     firecrawlBaseURL: stripTrailingSlash(text(input.firecrawlBaseURL) || FIRECRAWL_DEFAULT_BASE),
     firecrawlApiVersion: text(input.firecrawlApiVersion) || 'v2',
-    firecrawlOnlyMainContent: booleanOr(input.firecrawlOnlyMainContent, true),
+    firecrawlMainContent: booleanOr(input.firecrawlMainContent, true),
     firecrawlMaxAge: integerOr(input.firecrawlMaxAge, 172800000, 0, 604800000),
     firecrawlTimeoutMs: integerOr(input.firecrawlTimeoutMs, 30000, 1000, MAX_TIMER_MS),
     firecrawlMaxChars: integerOr(input.firecrawlMaxChars, 100000, 1000, 5000000),
-    firecrawlSearchLimit: integerOr(input.firecrawlSearchLimit, 10, 1, 100),
 
     fallbackToHttp: booleanOr(input.fallbackToHttp, true),
     fallbackTimeoutMs: integerOr(input.fallbackTimeoutMs, 20000, 1000, MAX_TIMER_MS),
     fallbackMaxChars: integerOr(input.fallbackMaxChars, 100000, 1000, 5000000),
     fallbackMaxBytes: integerOr(input.fallbackMaxBytes, 5000000, 1000, 50000000),
     fallbackMaxRedirects: integerOr(input.fallbackMaxRedirects, 5, 0, 20),
-    fallbackUserAgent: text(input.fallbackUserAgent) || `${PLUGIN}/0.2.0`,
+    fallbackUserAgent: text(input.fallbackUserAgent) || `${PLUGIN}/0.3.0`,
   }
   for (const field of ['tavilyBaseURL', 'exaBaseURL', 'firecrawlBaseURL']) {
     try {
@@ -136,6 +198,46 @@ function resolveConfig(raw) {
     }
   }
   return config
+}
+
+/* ------------------------------------------------------------- capabilities -- */
+
+/**
+ * What each vendor can honour. `partial` means "only under a condition the
+ * adapter has to check"; everything unsupported becomes a notice, never a throw
+ * unless `options.strict` is set.
+ */
+const CAPABILITIES = {
+  tavily: {
+    search: { recency: 'partial', domains: 'yes', locale: 'partial', depth: 'yes', answer: 'yes' },
+    fetch: { mainContent: 'no', cache: 'no' },
+  },
+  exa: {
+    search: { recency: 'yes', domains: 'yes', locale: 'yes', depth: 'yes', answer: 'no' },
+    fetch: { mainContent: 'no', cache: 'no' },
+  },
+  firecrawl: {
+    search: { recency: 'yes', domains: 'yes', locale: 'yes', depth: 'no', answer: 'no' },
+    fetch: { mainContent: 'yes', cache: 'yes' },
+  },
+}
+
+const capabilityMatrix = () =>
+  Object.fromEntries(
+    BACKENDS.map((vendor) => [
+      vendor,
+      {
+        search: { ...CAPABILITIES[vendor].search },
+        fetch: { ...CAPABILITIES[vendor].fetch },
+      },
+    ]),
+  )
+
+/** Report an option the vendor cannot honour; strict mode turns it into a throw. */
+function dropOption(options, notices, vendor, key, reason) {
+  const message = `${vendor} cannot honour "${key}": ${reason}`
+  if (options.strict) throw providerError(message, 'WEB_PROVIDER_BAD_REQUEST')
+  notices.push(message)
 }
 
 /* ---------------------------------------------------------- host services -- */
@@ -215,7 +317,6 @@ function stateFileCandidates() {
   return candidates
 }
 
-/** Backend choice survives restarts; the first readable candidate wins. */
 function loadState(config) {
   for (const file of stateFileCandidates()) {
     try {
@@ -223,16 +324,21 @@ function loadState(config) {
       return {
         searchBackend: backendOr(raw?.searchBackend, config.searchBackend),
         fetchBackend: backendOr(raw?.fetchBackend, config.fetchBackend),
+        options: raw?.options ? normalizeOptions({ ...config.options, ...raw.options }) : { ...config.options },
         storage: file,
       }
     } catch {
       /* try the next candidate */
     }
   }
-  return { searchBackend: config.searchBackend, fetchBackend: config.fetchBackend, storage: undefined }
+  return {
+    searchBackend: config.searchBackend,
+    fetchBackend: config.fetchBackend,
+    options: { ...config.options },
+    storage: undefined,
+  }
 }
 
-/** Write the first candidate that accepts it and report where it landed. */
 function persistState(state) {
   let lastError
   for (const file of stateFileCandidates()) {
@@ -245,6 +351,7 @@ function persistState(state) {
           {
             searchBackend: state.searchBackend,
             fetchBackend: state.fetchBackend,
+            options: state.options,
             updatedAt: new Date().toISOString(),
           },
           null,
@@ -268,6 +375,21 @@ const clip = (value, limit) => {
   return string.length > limit ? `${string.slice(0, limit)}…` : string
 }
 
+const flatten = (value) => String(value ?? '').replace(/\s+/g, ' ').trim()
+
+/** Every vendor's date becomes `YYYY-MM-DD`, or nothing. */
+function toDateOnly(value) {
+  const candidate = text(value)
+  if (candidate === '') return undefined
+  const iso = /^(\d{4}-\d{2}-\d{2})/.exec(candidate)
+  if (iso !== null) return iso[1]
+  const parsed = Date.parse(candidate)
+  if (Number.isNaN(parsed)) return undefined
+  return new Date(parsed).toISOString().slice(0, 10)
+}
+
+const isoDaysAgo = (days) => new Date(Date.now() - days * 86400000).toISOString()
+
 async function withDeadline(signal, timeoutMs, label, task) {
   if (signal?.aborted) throw providerError(`${label} aborted`, 'WEB_ABORTED')
   const controller = new AbortController()
@@ -284,15 +406,14 @@ async function withDeadline(signal, timeoutMs, label, task) {
   } catch (error) {
     if (error?.code) throw error
     if (signal?.aborted) throw providerError(`${label} aborted`, 'WEB_ABORTED')
-    if (timedOut) throw providerError(`${label} timed out after ${timeoutMs}ms`, 'WEB_FETCH_TIMEOUT')
-    throw providerError(`${label} failed: ${error?.message ?? String(error)}`, 'WEB_PROVIDER_ERROR')
+    throw transportFailure(label, error, timedOut, timeoutMs)
   } finally {
     clearTimeout(timer)
     signal?.removeEventListener('abort', forwardAbort)
   }
 }
 
-async function postJson(url, body, { headers, timeoutMs, signal, label }) {
+async function postJson(url, body, { headers, timeoutMs, signal, label, vendor }) {
   return withDeadline(signal, timeoutMs, label, async (inner) => {
     const response = await fetch(url, {
       method: 'POST',
@@ -301,45 +422,132 @@ async function postJson(url, body, { headers, timeoutMs, signal, label }) {
       signal: inner,
     })
     const raw = await response.text()
-    if (!response.ok) {
-      throw providerError(`${label} failed with HTTP ${response.status}: ${clip(raw, 300)}`, 'WEB_PROVIDER_ERROR')
-    }
+    if (!response.ok) throw classifyFailure(vendor, response.status, raw)
     try {
       return JSON.parse(raw)
     } catch {
-      throw providerError(`${label} returned a non-JSON response`, 'WEB_PROVIDER_ERROR')
+      throw providerError(`${vendor} returned a non-JSON response`, 'WEB_PROVIDER_UPSTREAM')
     }
   })
 }
 
-/** Normalize whichever result-array shape a vendor uses into WebSearchSource[]. */
-function toSources(items) {
+/**
+ * The single source shape. `author` and `score` are normalized into the snippet
+ * (the Harness contract has no field for them) and every date is `YYYY-MM-DD`.
+ */
+function normalizeSource(vendor, raw) {
+  const url = text(raw?.url) || text(raw?.link) || text(raw?.metadata?.sourceURL)
+  if (url === '') return undefined
+  const title = flatten(raw?.title) || undefined
+  const highlights = Array.isArray(raw?.highlights) ? raw.highlights.map(flatten).filter(Boolean).join(' ') : ''
+  const body = flatten(
+    raw?.description || raw?.snippet || raw?.summary || raw?.text || raw?.content || highlights,
+  )
+  const author = flatten(raw?.author)
+  let snippet = body
+  if (snippet === '' && author !== '') snippet = author
+  else if (snippet !== '' && author !== '') snippet = `${snippet} · ${author}`
+  const source = { url }
+  if (title !== undefined) source.title = title
+  if (snippet !== '') source.snippet = clip(snippet, SNIPPET_CHARS)
+  const publishedAt = toDateOnly(raw?.published_date ?? raw?.publishedDate ?? raw?.date)
+  if (publishedAt !== undefined) source.publishedAt = publishedAt
+  return { source, vendor }
+}
+
+function normalizeSources(vendor, items) {
   const sources = []
   const seen = new Set()
   for (const item of Array.isArray(items) ? items : []) {
-    const url = text(item?.url) || text(item?.link) || text(item?.metadata?.sourceURL)
-    if (url === '' || seen.has(url)) continue
-    seen.add(url)
-    const source = { url }
-    const title = text(item?.title)
-    if (title !== '') source.title = title
-    const highlights = Array.isArray(item?.highlights) ? item.highlights.map((entry) => text(entry)).filter(Boolean).join(' ') : ''
-    const snippet =
-      text(item?.description) ||
-      text(item?.snippet) ||
-      text(item?.summary) ||
-      text(item?.text) ||
-      text(item?.content) ||
-      highlights
-    if (snippet !== '') {
-      const flat = snippet.replace(/\s+/g, ' ')
-      source.snippet = flat.length > 400 ? `${flat.slice(0, 400)}…` : flat
-    }
-    const publishedAt = text(item?.published_date) || text(item?.publishedDate) || text(item?.date)
-    if (publishedAt !== '') source.publishedAt = publishedAt
-    sources.push(source)
+    const normalized = normalizeSource(vendor, item)
+    if (normalized === undefined || seen.has(normalized.source.url)) continue
+    seen.add(normalized.source.url)
+    sources.push(normalized.source)
   }
   return sources
+}
+
+/** Vendor warnings/notices plus our degradation notices, rendered for the model. */
+function composeAnswer(answer, notices) {
+  const blocks = []
+  if (answer !== '') blocks.push(answer)
+  for (const notice of notices) blocks.push(`> provider notice: ${notice}`)
+  return blocks.length === 0 ? undefined : blocks.join('\n\n')
+}
+
+/* ---------------------------------------------------------------- adapters -- */
+
+/** Translate the semantic knobs into Tavily's parameters. */
+function tavilySearchBody(config, options, request, notices) {
+  const body = {
+    query: text(request?.query),
+    max_results: clampResults(request, config.tavilyMaxResults, config.tavilyMaxResults),
+    search_depth: options.depth === 'auto' ? config.tavilySearchDepth : options.depth === 'deep' ? 'advanced' : 'basic',
+    topic: config.tavilyTopic,
+  }
+  if (options.answer !== 'off') body.include_answer = true
+  if (options.recency !== 'any') {
+    if (options.strict) {
+      dropOption(options, notices, 'tavily', 'recency', 'it only filters by date when topic=news')
+    } else if (config.tavilyTopic === 'news') {
+      body.days = RECENCY_DAYS[options.recency]
+    } else {
+      dropOption(options, notices, 'tavily', 'recency', 'it only filters by date when topic=news')
+    }
+  }
+  if (options.includeDomains.length > 0) body.include_domains = options.includeDomains
+  if (options.excludeDomains.length > 0) body.exclude_domains = options.excludeDomains
+  if (options.locale !== '') body.country = options.locale
+  return body
+}
+
+function exaSearchBody(config, options, request, notices) {
+  const type =
+    options.depth === 'auto'
+      ? config.exaSearchType
+      : options.depth === 'fast'
+        ? 'lite'
+        : options.depth === 'deep'
+          ? 'deep'
+          : 'auto'
+  const body = {
+    query: text(request?.query),
+    type,
+    numResults: clampResults(request, config.exaNumResults, 100),
+    contents: { highlights: true },
+  }
+  if (options.answer === 'on') {
+    dropOption(options, notices, 'exa', 'answer', 'it only synthesizes an answer for deep search types')
+  }
+  if (options.recency !== 'any') body.startPublishedDate = isoDaysAgo(RECENCY_DAYS[options.recency])
+  if (options.includeDomains.length > 0) body.includeDomains = options.includeDomains
+  if (options.excludeDomains.length > 0) body.excludeDomains = options.excludeDomains
+  if (options.locale !== '') body.userLocation = options.locale
+  return body
+}
+
+function firecrawlSearchBody(config, options, request, notices) {
+  const body = {
+    query: text(request?.query),
+    limit: clampResults(request, 10, 100),
+    sources: ['web'],
+  }
+  if (options.depth !== 'auto') {
+    dropOption(options, notices, 'firecrawl', 'depth', 'its search has no depth setting')
+  }
+  if (options.answer === 'on') {
+    dropOption(options, notices, 'firecrawl', 'answer', 'its search returns no synthesized answer')
+  }
+  if (options.recency !== 'any') {
+    body.tbs = { day: 'qdr:d', week: 'qdr:w', month: 'qdr:m', year: 'qdr:y' }[options.recency]
+  }
+  if (options.includeDomains.length > 0) body.includeDomains = options.includeDomains
+  if (options.excludeDomains.length > 0) body.excludeDomains = options.excludeDomains
+  if (options.locale !== '') {
+    const country = options.locale.includes('-') ? options.locale.split('-').pop() : options.locale
+    body.country = country.toUpperCase().slice(0, 2)
+  }
+  return body
 }
 
 const clampResults = (request, fallback, master) => {
@@ -347,86 +555,64 @@ const clampResults = (request, fallback, master) => {
   return Math.max(1, Math.min(master, requested))
 }
 
-/* ---------------------------------------------------------------- searches -- */
-
-async function tavilySearch(ctx, config, request, signal) {
+async function tavilySearch(ctx, config, options, request, signal, notices) {
   const apiKey = await requireKey(ctx, config, 'tavily')
-  const body = {
-    query: text(request?.query),
-    max_results: clampResults(request, config.tavilyMaxResults, config.tavilyMaxResults),
-    search_depth: config.tavilySearchDepth,
-    topic: config.tavilyTopic,
-  }
-  if (config.tavilyIncludeAnswer) body.include_answer = true
-  const payload = await postJson(`${config.tavilyBaseURL}/search`, body, {
+  const payload = await postJson(`${config.tavilyBaseURL}/search`, tavilySearchBody(config, options, request, notices), {
     headers: { authorization: `Bearer ${apiKey}` },
     timeoutMs: config.tavilyTimeoutMs,
     signal,
-    label: 'Tavily search',
+    label: 'tavily search',
+    vendor: 'tavily',
   })
-  const answer = text(payload?.answer)
   return {
-    content: answer === '' ? undefined : answer,
-    sources: toSources(payload?.results),
-    truncated: false,
+    answer: flatten(payload?.answer),
+    sources: normalizeSources('tavily', payload?.results),
   }
 }
 
-async function exaSearch(ctx, config, request, signal) {
+async function exaSearch(ctx, config, options, request, signal, notices) {
   const apiKey = await requireKey(ctx, config, 'exa')
-  const body = {
-    query: text(request?.query),
-    type: config.exaSearchType,
-    numResults: clampResults(request, config.exaNumResults, 100),
-    contents: { highlights: true },
-  }
-  const payload = await postJson(`${config.exaBaseURL}/search`, body, {
+  const payload = await postJson(`${config.exaBaseURL}/search`, exaSearchBody(config, options, request, notices), {
     headers: { authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey },
     timeoutMs: config.exaTimeoutMs,
     signal,
-    label: 'Exa search',
+    label: 'exa search',
+    vendor: 'exa',
   })
-  const answer = text(payload?.output)
+  // Exa only returns synthesized prose for deep search types, under `output`.
   return {
-    content: answer === '' ? undefined : answer,
-    sources: toSources(payload?.results),
-    truncated: false,
+    answer: flatten(payload?.output),
+    sources: normalizeSources('exa', payload?.results),
   }
 }
 
-async function firecrawlSearch(ctx, config, request, signal) {
+async function firecrawlSearch(ctx, config, options, request, signal, notices) {
   const apiKey = await requireKey(ctx, config, 'firecrawl')
   const payload = await postJson(
     `${config.firecrawlBaseURL}/${config.firecrawlApiVersion}/search`,
-    {
-      query: text(request?.query),
-      limit: clampResults(request, config.firecrawlSearchLimit, 100),
-      sources: ['web'],
-    },
+    firecrawlSearchBody(config, options, request, notices),
     {
       headers: { authorization: `Bearer ${apiKey}` },
       timeoutMs: config.firecrawlTimeoutMs,
       signal,
-      label: 'Firecrawl search',
+      label: 'firecrawl search',
+      vendor: 'firecrawl',
     },
   )
   if (payload?.success === false) {
-    throw providerError(
-      `Firecrawl search failed: ${clip(payload?.error ?? 'unknown error', 300)}`,
-      'WEB_PROVIDER_ERROR',
-    )
+    throw providerError(`firecrawl search failed: ${clip(payload?.error ?? 'unknown error', 240)}`, 'WEB_PROVIDER_UPSTREAM')
   }
   const data = payload?.data
   const items = Array.isArray(data) ? data : Array.isArray(data?.web) ? data.web : []
-  return { content: undefined, sources: toSources(items), truncated: false }
+  return { answer: '', sources: normalizeSources('firecrawl', items) }
 }
 
 /* ----------------------------------------------------------------- fetches -- */
 
-const markdownResult = (markdown, maxChars, url, statusCode = 200) => {
-  const body = text(markdown)
-  if (body === '') throw providerError('the provider returned no page content', 'WEB_PROVIDER_ERROR')
-  const truncated = body.length > maxChars
+function documentResult(text, maxChars, url, statusCode = 200) {
+  const content = String(text ?? '').trim()
+  if (content === '') throw providerError('the provider returned no page content', 'WEB_PROVIDER_EMPTY')
+  const truncated = content.length > maxChars
   return {
     url,
     statusCode,
@@ -434,13 +620,13 @@ const markdownResult = (markdown, maxChars, url, statusCode = 200) => {
       // Markdown is handed over as text so dsh-tool-web does not run its
       // HTML->markdown pipeline a second time.
       kind: 'text',
-      content: truncated ? body.slice(0, maxChars) : body,
+      content: truncated ? content.slice(0, maxChars) : content,
     },
     truncated,
   }
 }
 
-async function firecrawlFetch(ctx, config, request, signal) {
+async function firecrawlFetch(ctx, config, options, request, signal) {
   const apiKey = await requireKey(ctx, config, 'firecrawl')
   const url = text(request?.url)
   const payload = await postJson(
@@ -448,7 +634,7 @@ async function firecrawlFetch(ctx, config, request, signal) {
     {
       url,
       formats: ['markdown'],
-      onlyMainContent: config.firecrawlOnlyMainContent,
+      onlyMainContent: Boolean(options.mainContent),
       maxAge: config.firecrawlMaxAge,
       timeout: config.firecrawlTimeoutMs,
     },
@@ -456,25 +642,29 @@ async function firecrawlFetch(ctx, config, request, signal) {
       headers: { authorization: `Bearer ${apiKey}` },
       timeoutMs: config.firecrawlTimeoutMs + 15000,
       signal,
-      label: 'Firecrawl scrape',
+      label: 'firecrawl scrape',
+      vendor: 'firecrawl',
     },
   )
   if (payload?.success === false) {
     throw providerError(
-      `Firecrawl scrape failed: ${clip(payload?.error ?? payload?.message ?? 'unknown error', 300)}`,
-      'WEB_PROVIDER_ERROR',
+      `firecrawl scrape failed: ${clip(payload?.error ?? payload?.message ?? 'unknown error', 240)}`,
+      'WEB_PROVIDER_UPSTREAM',
     )
   }
   const doc = payload?.data ?? payload
   const metadata = doc?.metadata ?? {}
   const statusCode = Number.isInteger(metadata.statusCode) ? metadata.statusCode : 200
   const finalUrl = text(metadata.url) || text(metadata.sourceURL) || url
-  return markdownResult(doc?.markdown ?? doc?.content, config.firecrawlMaxChars, finalUrl, statusCode)
+  return documentResult(doc?.markdown ?? doc?.content, config.firecrawlMaxChars, finalUrl, statusCode)
 }
 
-async function exaFetch(ctx, config, request, signal) {
+async function exaFetch(ctx, config, options, request, signal, notices) {
   const apiKey = await requireKey(ctx, config, 'exa')
   const url = text(request?.url)
+  if (!options.mainContent) {
+    dropOption(options, notices, 'exa', 'mainContent', 'it always returns extracted page text')
+  }
   const payload = await postJson(
     `${config.exaBaseURL}/contents`,
     { urls: [url], text: true },
@@ -482,24 +672,17 @@ async function exaFetch(ctx, config, request, signal) {
       headers: { authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey },
       timeoutMs: config.exaTimeoutMs,
       signal,
-      label: 'Exa contents',
+      label: 'exa contents',
+      vendor: 'exa',
     },
   )
   const first = Array.isArray(payload?.results) ? payload.results[0] : undefined
-  if (first === undefined) throw providerError('Exa returned no page content', 'WEB_PROVIDER_ERROR')
-  const content =
-    text(first.text) || (Array.isArray(first.highlights) ? first.highlights.map((entry) => text(entry)).join('\n\n') : '')
-  if (content === '') throw providerError('Exa returned no page content', 'WEB_PROVIDER_ERROR')
-  const truncated = content.length > config.exaMaxChars
-  return {
-    url: text(first.url) || url,
-    statusCode: 200,
-    body: { kind: 'text', content: truncated ? content.slice(0, config.exaMaxChars) : content },
-    truncated,
-  }
+  if (first === undefined) throw providerError('exa returned no page content', 'WEB_PROVIDER_EMPTY')
+  const content = text(first.text) || (Array.isArray(first.highlights) ? first.highlights.join('\n\n') : '')
+  return documentResult(content, config.exaMaxChars, text(first.url) || url)
 }
 
-async function tavilyFetch(ctx, config, request, signal) {
+async function tavilyFetch(ctx, config, options, request, signal) {
   const apiKey = await requireKey(ctx, config, 'tavily')
   const url = text(request?.url)
   const payload = await postJson(
@@ -509,19 +692,20 @@ async function tavilyFetch(ctx, config, request, signal) {
       headers: { authorization: `Bearer ${apiKey}` },
       timeoutMs: config.tavilyTimeoutMs,
       signal,
-      label: 'Tavily extract',
+      label: 'tavily extract',
+      vendor: 'tavily',
     },
   )
   const first = Array.isArray(payload?.results) ? payload.results[0] : undefined
-  const raw = text(first?.raw_content) || text(payload?.raw_content)
-  if (raw === '') throw providerError('Tavily returned no page content', 'WEB_PROVIDER_ERROR')
-  const truncated = raw.length > config.tavilyMaxChars
-  return {
-    url: text(first?.url) || url,
-    statusCode: 200,
-    body: { kind: 'text', content: truncated ? raw.slice(0, config.tavilyMaxChars) : raw },
-    truncated,
+  if (first === undefined) {
+    const failed = Array.isArray(payload?.failed_results) ? payload.failed_results[0] : undefined
+    throw providerError(
+      `tavily could not extract ${url}${failed?.error ? `: ${clip(failed.error, 200)}` : ''}`,
+      'WEB_PROVIDER_EMPTY',
+    )
   }
+  const raw = text(first.raw_content)
+  return documentResult(raw, config.tavilyMaxChars, text(first.url) || url)
 }
 
 /* -------------------------------------------------- credential-free fallback -- */
@@ -615,7 +799,7 @@ async function readCapped(response, maxBytes) {
     }
   } catch (error) {
     if (error?.code) throw error
-    throw providerError(`reading the response body failed: ${error?.message ?? String(error)}`, 'WEB_PROVIDER_ERROR')
+    throw transportFailure('local fetch', error, false, 0)
   } finally {
     try {
       await reader.cancel()
@@ -659,7 +843,7 @@ async function localFetch(config, request, signal) {
         if (location === null || location === '') {
           throw providerError(
             `redirect response (HTTP ${response.status}) without a Location header`,
-            'WEB_PROVIDER_ERROR',
+            'WEB_PROVIDER_UPSTREAM',
           )
         }
         current = parseTarget(new URL(location, current).toString())
@@ -695,34 +879,51 @@ const FETCH_VENDOR = { tavily: tavilyFetch, exa: exaFetch, firecrawl: firecrawlF
 
 function createSearchProvider(ctx, config, state) {
   return {
-    id: config.searchProviderId,
+    id: config.providerId,
     available() {
       return true
     },
     async search(request, signal) {
       const vendor = SEARCH_VENDOR[state.searchBackend] ?? SEARCH_VENDOR[DEFAULT_SEARCH]
-      return vendor(ctx, config, request, signal)
+      const notices = []
+      const result = await vendor(ctx, config, state.options, request, signal, notices)
+      if (result.sources.length === 0) notices.push(`${state.searchBackend} returned no results for this query`)
+      return {
+        content: composeAnswer(result.answer, notices),
+        sources: result.sources,
+        truncated: false,
+      }
     },
   }
 }
 
 function createFetchProvider(ctx, config, state) {
   return {
-    id: config.fetchProviderId,
+    id: config.providerId,
     available() {
       return true
     },
     async fetch(request, signal) {
       const vendor = FETCH_VENDOR[state.fetchBackend] ?? FETCH_VENDOR[DEFAULT_FETCH]
+      const notices = []
       try {
-        return await vendor(ctx, config, request, signal)
+        const result = await vendor(ctx, config, { ...state.options, mainContent: config.firecrawlMainContent }, request, signal, notices)
+        return withNotices(result, notices)
       } catch (error) {
         if (!config.fallbackToHttp) throw error
         if (error?.code === 'WEB_ABORTED' || signal?.aborted) throw error
-        return localFetch(config, request, signal)
+        const result = await localFetch(config, request, signal)
+        return withNotices(result, [...notices, `fell back to a direct HTTP fetch: ${error?.code ?? 'error'}`])
       }
     },
   }
+}
+
+/** Fetch-side notices ride at the end of the body, clearly marked as ours. */
+function withNotices(result, notices) {
+  if (notices.length === 0) return result
+  const trailer = notices.map((notice) => `> provider notice: ${notice}`).join('\n')
+  return { ...result, body: { ...result.body, content: `${result.body.content}\n\n${trailer}` } }
 }
 
 /* ------------------------------------------------------------------ routes -- */
@@ -749,14 +950,14 @@ async function readJsonBody(req) {
   let size = 0
   for await (const chunk of req) {
     size += chunk.length
-    if (size > BODY_LIMIT_BYTES) throw providerError('request body too large', 'WEB_PROVIDER_ERROR')
+    if (size > BODY_LIMIT_BYTES) throw providerError('request body too large', 'WEB_PROVIDER_BAD_REQUEST')
     chunks.push(chunk)
   }
   if (size === 0) return {}
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'))
   } catch {
-    throw providerError('request body must be JSON', 'WEB_PROVIDER_ERROR')
+    throw providerError('request body must be JSON', 'WEB_PROVIDER_BAD_REQUEST')
   }
 }
 
@@ -765,6 +966,8 @@ function createStateRoutes(ctx, config, state) {
     searchBackend: state.searchBackend,
     fetchBackend: state.fetchBackend,
     backends: BACKENDS,
+    options: state.options,
+    capabilities: capabilityMatrix(),
     keys: await describeKeys(ctx, config),
     fallbackToHttp: config.fallbackToHttp,
     stateFile: state.storage ?? stateFileCandidates()[0],
@@ -791,21 +994,28 @@ function createStateRoutes(ctx, config, state) {
       if (typeof body.fetchBackend === 'string') {
         state.fetchBackend = backendOr(body.fetchBackend, state.fetchBackend)
       }
+      if (body.options && typeof body.options === 'object') {
+        state.options = normalizeOptions({ ...state.options, ...body.options })
+      }
       if (body.setKey && typeof body.setKey === 'object') {
         const vendor = backendOr(body.setKey.vendor, '')
         const value = text(body.setKey.value)
         const credentials = ctx.get('credentials')
         if (vendor === '' || value === '') {
-          throw providerError('setKey needs a vendor and a non-empty value', 'WEB_PROVIDER_ERROR')
+          throw providerError('setKey needs a vendor and a non-empty value', 'WEB_PROVIDER_BAD_REQUEST')
         }
-        if (credentials === undefined) throw providerError('the credentials service is not available', 'WEB_PROVIDER_ERROR')
+        if (credentials === undefined) {
+          throw providerError('the credentials service is not available', 'WEB_PROVIDER_ERROR')
+        }
         await credentials.set(credentialRefFor(config, vendor), value)
       }
       if (body.clearKey && typeof body.clearKey === 'object') {
         const vendor = backendOr(body.clearKey.vendor, '')
         const credentials = ctx.get('credentials')
-        if (vendor === '') throw providerError('clearKey needs a vendor', 'WEB_PROVIDER_ERROR')
-        if (credentials === undefined) throw providerError('the credentials service is not available', 'WEB_PROVIDER_ERROR')
+        if (vendor === '') throw providerError('clearKey needs a vendor', 'WEB_PROVIDER_BAD_REQUEST')
+        if (credentials === undefined) {
+          throw providerError('the credentials service is not available', 'WEB_PROVIDER_ERROR')
+        }
         await credentials.unset(credentialRefFor(config, vendor))
       }
       const persistence = persistState(state)
