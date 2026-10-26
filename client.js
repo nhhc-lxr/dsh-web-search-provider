@@ -458,7 +458,7 @@ window.__ModuleLoader__.load({
                 next.providers.tavily.topic = value
               }),
             ),
-            selectRow(t('searchDepth'), provider.searchDepth, ['basic', 'advanced'], (value) =>
+            selectRow(t('searchDepth'), provider.searchDepth, ['basic', 'fast', 'advanced'], (value) =>
               edit((next) => {
                 next.providers.tavily.searchDepth = value
               }),

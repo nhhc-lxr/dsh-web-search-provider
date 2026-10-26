@@ -160,7 +160,7 @@ function defaultsFromConfig(config) {
         apiKey: text(config.tavilyApiKey),
         apiKeyEnv: text(config.tavilyApiKeyEnv) || CREDENTIAL_REF.tavily,
         topic: oneOf(config.tavilyTopic, ['general', 'news', 'finance'], 'general'),
-        searchDepth: oneOf(config.tavilySearchDepth, ['basic', 'advanced'], 'basic'),
+        searchDepth: oneOf(config.tavilySearchDepth, ['basic', 'fast', 'advanced'], 'basic'),
         answer: asBoolean(config.tavilyIncludeAnswer, true),
       },
       exa: {
@@ -237,7 +237,7 @@ function mergeSettings(base, patch) {
       if (vendor === 'tavily') {
         if (incoming.topic !== undefined) target.topic = oneOf(incoming.topic, ['general', 'news', 'finance'], target.topic)
         if (incoming.searchDepth !== undefined) {
-          target.searchDepth = oneOf(incoming.searchDepth, ['basic', 'advanced'], target.searchDepth)
+          target.searchDepth = oneOf(incoming.searchDepth, ['basic', 'fast', 'advanced'], target.searchDepth)
         }
         if (incoming.answer !== undefined) target.answer = asBoolean(incoming.answer, target.answer)
       }
@@ -477,6 +477,8 @@ async function tavilySearch(ctx, settings, request, signal, notices) {
     topic: provider.topic,
   }
   if (provider.answer) body.include_answer = true
+  // Published dates only come back when asked for (beta, free); topic=news implies it.
+  body.include_published_date = true
   if (options.includeDomains.length > 0) body.include_domains = options.includeDomains
   if (options.excludeDomains.length > 0) body.exclude_domains = options.excludeDomains
 
