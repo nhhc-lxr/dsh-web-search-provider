@@ -24,6 +24,8 @@ window.__ModuleLoader__.load({
         keys: 'API keys',
         save: 'Save',
         clear: 'Clear',
+        edit: 'Edit',
+        cancel: 'Cancel',
         saved: 'Saved',
         cleared: 'Cleared',
         localOnly: 'Applied now, but not persisted: ',
@@ -49,6 +51,8 @@ window.__ModuleLoader__.load({
         keys: 'API 密钥',
         save: '保存',
         clear: '清除',
+        edit: '编辑',
+        cancel: '取消',
         saved: '已保存',
         cleared: '已清除',
         localOnly: '已生效，但未能持久化：',
@@ -155,6 +159,19 @@ window.__ModuleLoader__.load({
         border: '1px solid currentColor',
         whiteSpace: 'nowrap',
       },
+      iconButton: {
+        height: 28,
+        width: 28,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 0,
+        background: 'transparent',
+        border: '1px solid var(--dsw-alias-border-l2)',
+        borderRadius: 7,
+        cursor: 'pointer',
+        color: 'var(--dsw-alias-label-secondary)',
+      },
       note: { margin: '10px 0 0', fontSize: 11, lineHeight: 1.6, color: 'var(--dsw-alias-label-secondary)' },
       error: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' },
       ok: { fontSize: 12, color: 'var(--dsw-alias-state-success-primary)' },
@@ -175,6 +192,31 @@ window.__ModuleLoader__.load({
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`)
       return payload
+    }
+
+    const ICONS = {
+      edit: ['M11.3 2.4a1.7 1.7 0 0 1 2.4 2.4L5.9 12.6l-3.3.6.6-3.3z'],
+      trash: ['M2.8 4.4h10.4', 'M6.4 4.4V2.9h3.2v1.5', 'M4.3 4.4l.7 8.1h6l.7-8.1'],
+      check: ['M3.1 8.4l3.2 3.2 6.6-6.8'],
+      close: ['M4.2 4.2l7.6 7.6', 'M11.8 4.2l-7.6 7.6'],
+    }
+
+    function Icon({ name }) {
+      return h(
+        'svg',
+        {
+          viewBox: '0 0 16 16',
+          width: 14,
+          height: 14,
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.5,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+          'aria-hidden': 'true',
+        },
+        (ICONS[name] || []).map((d, index) => h('path', { key: index, d })),
+      )
     }
 
     const clone = (value) => JSON.parse(JSON.stringify(value))
@@ -206,6 +248,7 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = React.useState('')
       const [draftKeys, setDraftKeys] = React.useState({})
       const [draftDomains, setDraftDomains] = React.useState({ include: null, exclude: null })
+      const [editingKeys, setEditingKeys] = React.useState({})
       const t = React.useMemo(() => createTranslate({ get: () => undefined }), [])
 
       const stateRef = React.useRef(null)
@@ -294,7 +337,9 @@ window.__ModuleLoader__.load({
             } else {
               setNotice(t(kind))
             }
+            const touched = body.setKey ? body.setKey.vendor : body.clearKey ? body.clearKey.vendor : undefined
             if (body.setKey) setDraftKeys((current) => ({ ...current, [body.setKey.vendor]: '' }))
+            if (touched !== undefined) setEditingKeys((current) => ({ ...current, [touched]: false }))
           } catch (cause) {
             setError(String(cause && cause.message ? cause.message : cause))
           } finally {
@@ -414,42 +459,72 @@ window.__ModuleLoader__.load({
         ),
       )
 
+      const iconButton = (name, label, onClick, options = {}) =>
+        h(
+          'button',
+          {
+            type: 'button',
+            style: { ...styles.iconButton, color: options.color || styles.iconButton.color },
+            title: label,
+            'aria-label': label,
+            disabled: options.disabled === true,
+            onClick,
+          },
+          h(Icon, { name }),
+        )
+
       const keyRows = VENDORS.map((vendor) => {
         const key = (state.keys && state.keys[vendor]) || {}
         const draft = draftKeys[vendor] === undefined ? '' : draftKeys[vendor]
+        const configured = Boolean(key.configured)
+        const editing = editingKeys[vendor] === true || !configured
+        const controls = []
+
+        if (editing) {
+          controls.push(
+            h('input', {
+              key: 'input',
+              style: styles.input,
+              type: 'password',
+              autoComplete: 'off',
+              spellCheck: false,
+              placeholder: `${t('keyPlaceholder')} (${key.ref || vendor})`,
+              value: draft,
+              disabled: busy,
+              onChange: (event) => setDraftKeys({ ...draftKeys, [vendor]: event.target.value }),
+            }),
+            iconButton(
+              'check',
+              t('save'),
+              () => applyKeys({ setKey: { vendor, value: draft.trim() } }, 'saved'),
+              { color: 'var(--dsw-alias-brand-primary)', disabled: busy || draft.trim() === '' },
+            ),
+          )
+          if (configured) {
+            controls.push(
+              iconButton('close', t('cancel'), () =>
+                setEditingKeys((current) => ({ ...current, [vendor]: false })),
+              ),
+            )
+          }
+        } else {
+          controls.push(
+            iconButton('edit', t('edit'), () =>
+              setEditingKeys((current) => ({ ...current, [vendor]: true })),
+            ),
+            iconButton('trash', t('clear'), () => applyKeys({ clearKey: { vendor } }, 'cleared'), {
+              color: 'var(--dsw-alias-state-error-primary)',
+              disabled: busy,
+            }),
+          )
+        }
+
         return h(
           'div',
           { key: vendor, style: styles.row },
           h('span', { style: styles.vendor }, labelOf(vendor)),
           keyBadge(t, key),
-          h('input', {
-            style: styles.input,
-            type: 'password',
-            autoComplete: 'off',
-            spellCheck: false,
-            placeholder: `${t('keyPlaceholder')} (${key.ref || vendor})`,
-            value: draft,
-            disabled: busy,
-            onChange: (event) => setDraftKeys({ ...draftKeys, [vendor]: event.target.value }),
-          }),
-          h(
-            'button',
-            {
-              style: styles.primary,
-              disabled: busy || draft.trim() === '',
-              onClick: () => applyKeys({ setKey: { vendor, value: draft.trim() } }, 'saved'),
-            },
-            t('save'),
-          ),
-          h(
-            'button',
-            {
-              style: styles.button,
-              disabled: busy,
-              onClick: () => applyKeys({ clearKey: { vendor } }, 'cleared'),
-            },
-            t('clear'),
-          ),
+          ...controls,
         )
       })
 
