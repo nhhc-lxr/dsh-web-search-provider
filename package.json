@@ -1,0 +1,53 @@
+{
+  "name": "dsh-web-search-provider",
+  "version": "0.1.0",
+  "description": "Tavily search and Firecrawl fetch as interchangeable ctx.web backends for DeepSeek Harness: swaps the engine behind web_search/web_fetch without changing tool names, schemas or prompts, and falls back to a credential-free local fetch.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "icon": "icon.svg",
+  "scripts": {
+    "test": "node test/smoke.mjs"
+  },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "web-search",
+    "web-fetch",
+    "tavily",
+    "firecrawl"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nhhc-lxr/dsh-web-search-provider.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nhhc-lxr/dsh-web-search-provider/issues"
+  },
+  "homepage": "https://github.com/nhhc-lxr/dsh-web-search-provider#readme"
+}

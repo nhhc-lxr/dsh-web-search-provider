@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "网页搜索后端（Tavily + Firecrawl）",
+    "description": "把 web_search / web_fetch 的后端换成 Tavily 搜索与 Firecrawl 抓取；Firecrawl 失败时自动退回无需密钥的本地抓取。"
+  }
+}

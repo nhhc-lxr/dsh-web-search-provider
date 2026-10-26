@@ -1,0 +1,22 @@
+# dsh bundle patch: registers the providers and pins them on the `web` row.
+#
+# `insert` mounts this package's own Host row. The second entry targets the
+# existing `web` row (owned by @deepseek-ai/dsh-web) and replaces its whole
+# `config` — `config` is never deep-merged, so both ids are restated here.
+#
+# Switch a backend by changing these two ids (or remove the second entry to let
+# the shipped defaults win again). The selection is resolved per call, so a
+# saved config change applies to the next web_search/web_fetch — no restart.
+- insert:
+    - id: web-search-provider
+      name: 'dsh-web-search-provider'
+      config:
+        tavilyApiKeyEnv: TAVILY_API_KEY
+        firecrawlApiKeyEnv: FIRECRAWL_API_KEY
+        fallbackToHttp: true
+
+- id: web
+  name: '@deepseek-ai/dsh-web'
+  config:
+    searchProvider: tavily
+    fetchProvider: firecrawl
