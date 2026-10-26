@@ -8,7 +8,6 @@ window.__ModuleLoader__.load({
     const VENDORS = ['tavily', 'exa', 'firecrawl']
     const LABELS = { tavily: 'Tavily', exa: 'Exa', firecrawl: 'Firecrawl' }
     const labelOf = (vendor) => LABELS[vendor] || vendor
-    const DEBOUNCE_MS = 600
 
     const DICT = {
       en: {
@@ -17,10 +16,6 @@ window.__ModuleLoader__.load({
         backends: 'Backends',
         searchBackend: 'web_search',
         fetchBackend: 'web_fetch',
-        options: 'Shared options',
-        includeDomains: 'Only these domains',
-        excludeDomains: 'Exclude these domains',
-        fallback: 'Fall back to a direct HTTP fetch when the backend fails',
         keys: 'API keys',
         save: 'Save',
         clear: 'Clear',
@@ -36,7 +31,6 @@ window.__ModuleLoader__.load({
         loading: 'Loading…',
         loadFailed: 'Could not read the plugin state: ',
         keyPlaceholder: 'Paste the key',
-        domainsPlaceholder: 'a.com, b.com',
       },
       zh: {
         tab: '网页工具',
@@ -44,10 +38,6 @@ window.__ModuleLoader__.load({
         backends: '后端选择',
         searchBackend: 'web_search',
         fetchBackend: 'web_fetch',
-        options: '通用选项',
-        includeDomains: '只搜这些域名',
-        excludeDomains: '排除这些域名',
-        fallback: '后端失败时退回直接 HTTP 抓取',
         keys: 'API 密钥',
         save: '保存',
         clear: '清除',
@@ -63,7 +53,6 @@ window.__ModuleLoader__.load({
         loading: '加载中…',
         loadFailed: '读取插件状态失败：',
         keyPlaceholder: '粘贴密钥',
-        domainsPlaceholder: 'a.com, b.com',
       },
     }
 
@@ -224,7 +213,6 @@ window.__ModuleLoader__.load({
     }
 
     const clone = (value) => JSON.parse(JSON.stringify(value))
-    const joinDomains = (value) => (Array.isArray(value) ? value.join(', ') : '')
     const splitDomains = (value) =>
       String(value)
         .split(/[\s,]+/)
@@ -251,7 +239,6 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       const [notice, setNotice] = React.useState('')
       const [draftKeys, setDraftKeys] = React.useState({})
-      const [draftDomains, setDraftDomains] = React.useState({ include: null, exclude: null })
       const [editingKeys, setEditingKeys] = React.useState({})
       const t = React.useMemo(() => createTranslate({ get: () => undefined }), [])
 
@@ -286,7 +273,6 @@ window.__ModuleLoader__.load({
           try {
             const payload = await writeState(body)
             setError('')
-            setDraftDomains({ include: null, exclude: null })
             setState((current) =>
               current
                 ? { ...current, keys: payload.keys || current.keys, stateFile: payload.stateFile || current.stateFile }
@@ -305,10 +291,9 @@ window.__ModuleLoader__.load({
       )
 
       const snapshotBody = (current) => ({
-        search: { backend: current.search.backend, options: current.search.options },
-        fetch: { backend: current.fetch.backend, options: current.fetch.options },
+        search: { backend: current.search.backend },
+        fetch: { backend: current.fetch.backend },
       })
-
       const edit = (mutate) => {
         const next = clone(stateRef.current)
         mutate(next)
@@ -318,14 +303,6 @@ window.__ModuleLoader__.load({
       }
 
       const saveNow = (next) => commit(snapshotBody(next))
-
-      const scheduleSave = () => {
-        if (timerRef.current !== null) clearTimeout(timerRef.current)
-        timerRef.current = setTimeout(() => {
-          timerRef.current = null
-          if (stateRef.current) commit(snapshotBody(stateRef.current))
-        }, DEBOUNCE_MS)
-      }
 
       const applyKeys = React.useCallback(
         async (body, kind) => {
@@ -406,63 +383,6 @@ window.__ModuleLoader__.load({
         ),
       )
 
-      const options = h(
-        'div',
-        { style: styles.card },
-        h('h3', { style: styles.cardTitle }, t('options')),
-        h(
-          'div',
-          { style: styles.row },
-          h('span', { style: styles.label }, t('includeDomains')),
-          h('input', {
-            style: styles.input,
-            type: 'text',
-            placeholder: t('domainsPlaceholder'),
-            value: draftDomains.include === null ? joinDomains(state.search.options.includeDomains) : draftDomains.include,
-            onChange: (event) => {
-              setDraftDomains((current) => ({ ...current, include: event.target.value }))
-              edit((next) => {
-                next.search.options.includeDomains = splitDomains(event.target.value)
-              })
-              scheduleSave()
-            },
-          }),
-        ),
-        h(
-          'div',
-          { style: styles.row },
-          h('span', { style: styles.label }, t('excludeDomains')),
-          h('input', {
-            style: styles.input,
-            type: 'text',
-            placeholder: t('domainsPlaceholder'),
-            value: draftDomains.exclude === null ? joinDomains(state.search.options.excludeDomains) : draftDomains.exclude,
-            onChange: (event) => {
-              setDraftDomains((current) => ({ ...current, exclude: event.target.value }))
-              edit((next) => {
-                next.search.options.excludeDomains = splitDomains(event.target.value)
-              })
-              scheduleSave()
-            },
-          }),
-        ),
-        h(
-          'div',
-          { style: styles.row },
-          h('span', { style: styles.label }, t('fallback')),
-          h('input', {
-            type: 'checkbox',
-            checked: Boolean(state.fetch.options.fallbackToHttp),
-            onChange: (event) =>
-              saveNow(
-                edit((next) => {
-                  next.fetch.options.fallbackToHttp = event.target.checked
-                }),
-              ),
-          }),
-        ),
-      )
-
       const iconButton = (name, label, onClick, options = {}) =>
         h(
           'button',
@@ -537,7 +457,6 @@ window.__ModuleLoader__.load({
         { style: styles.page },
         h('h2', { style: styles.title }, t('title')),
         backends,
-        options,
         h('div', { style: styles.card }, h('h3', { style: styles.cardTitle }, t('keys')), keyRows),
         notice === '' ? null : h('p', { style: styles.ok }, notice),
         error === '' ? null : h('p', { style: styles.error }, error),

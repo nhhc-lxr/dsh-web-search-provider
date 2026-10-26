@@ -204,21 +204,11 @@ function mergeSettings(base, patch) {
   if (typeof patch.search?.backend === 'string') {
     next.search.backend = oneOf(patch.search.backend, VENDORS, next.search.backend)
   }
-  if (patch.search?.options && typeof patch.search.options === 'object') {
-    const incoming = patch.search.options
-    const target = next.search.options
-    if (incoming.includeDomains !== undefined) target.includeDomains = domainList(incoming.includeDomains)
-    if (incoming.excludeDomains !== undefined) target.excludeDomains = domainList(incoming.excludeDomains)
-  }
+
   if (typeof patch.fetch?.backend === 'string') {
     next.fetch.backend = oneOf(patch.fetch.backend, VENDORS, next.fetch.backend)
   }
-  if (patch.fetch?.options && typeof patch.fetch.options === 'object') {
-    const incoming = patch.fetch.options
-    if (incoming.fallbackToHttp !== undefined) {
-      next.fetch.options.fallbackToHttp = asBoolean(incoming.fallbackToHttp, next.fetch.options.fallbackToHttp)
-    }
-  }
+
   return next
 }
 
@@ -318,8 +308,8 @@ function persistSettings(settings) {
       mkdirSync(dirname(file), { recursive: true })
       const temporary = `${file}.tmp`
       const payload = {
-        search: settings.search,
-        fetch: settings.fetch,
+        search: { backend: settings.search.backend },
+        fetch: { backend: settings.fetch.backend },
         updatedAt: new Date().toISOString(),
       }
       writeFileSync(temporary, `${JSON.stringify(payload, null, 2)}\n`)
@@ -854,8 +844,8 @@ function createStateRoutes(ctx, state) {
   }
 
   const snapshot = () => ({
-    search: state.settings.search,
-    fetch: state.settings.fetch,
+    search: { backend: state.settings.search.backend },
+    fetch: { backend: state.settings.fetch.backend },
     keys: state.keys,
     stateFile: state.storage ?? stateFileCandidates()[0],
   })

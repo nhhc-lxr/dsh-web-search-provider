@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-tool-provider",
-  "version": "0.10.4",
+  "version": "0.11.0",
   "description": "Normalization layer for the Harness web seam: one provider in front of web_search and web_fetch that layers shared options over per-vendor settings for Tavily, Exa and Firecrawl.",
   "type": "module",
   "main": "index.js",
