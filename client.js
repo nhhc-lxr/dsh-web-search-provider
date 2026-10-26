@@ -307,6 +307,18 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
+      const askedRef = React.useRef({})
+      React.useEffect(() => {
+        if (!state) return
+        for (const vendor of VENDORS) {
+          const key = state.keys && state.keys[vendor]
+          if (key && key.configured && askedRef.current[vendor] !== true) {
+            askedRef.current[vendor] = true
+            loadCredits(vendor)
+          }
+        }
+      }, [state, loadCredits])
+
       /** Auto-save: keep local edits, only refresh the fields the host owns. */
       const commit = React.useCallback(
         async (body) => {
@@ -458,10 +470,7 @@ window.__ModuleLoader__.load({
           }
         } else {
           actions.push(
-            iconButton('edit', t('edit'), () => {
-              setEditingKeys((current) => ({ ...current, [vendor]: true }))
-              loadCredits(vendor)
-            }),
+            iconButton('edit', t('edit'), () => setEditingKeys((current) => ({ ...current, [vendor]: true }))),
             iconButton('trash', t('clear'), () => applyKeys({ clearKey: { vendor } }, 'cleared'), {
               color: 'var(--dsw-alias-state-error-primary)',
               disabled: busy,
@@ -475,9 +484,6 @@ window.__ModuleLoader__.load({
           h('span', { style: styles.vendor }, labelOf(vendor)),
           keyBadge(t, key),
           editing
-            ? h('span', { key: 'credits', style: styles.credits }, creditsText(t, credits[vendor]))
-            : null,
-          editing
             ? h('input', {
                 key: 'input',
                 style: { ...styles.input, flex: '1 1 160px', minWidth: 130 },
@@ -489,7 +495,7 @@ window.__ModuleLoader__.load({
                 disabled: busy,
                 onChange: (event) => setDraftKeys({ ...draftKeys, [vendor]: event.target.value }),
               })
-            : h('div', { key: 'spacer', style: { flex: '1 1 160px', minWidth: 130, height: 30 } }),
+            : h('span', { key: 'credits', style: styles.credits }, creditsText(t, credits[vendor])),
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto', flex: '0 0 auto' } },
