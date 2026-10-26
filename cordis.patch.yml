@@ -1,22 +1,23 @@
-# dsh bundle patch: registers the providers and pins them on the `web` row.
+# dsh bundle patch: mounts the provider pair and pins them on the `web` row.
 #
 # `insert` mounts this package's own Host row. The second entry targets the
 # existing `web` row (owned by @deepseek-ai/dsh-web) and replaces its whole
 # `config` — `config` is never deep-merged, so both ids are restated here.
 #
-# Switch a backend by changing these two ids (or remove the second entry to let
-# the shipped defaults win again). The selection is resolved per call, so a
-# saved config change applies to the next web_search/web_fetch — no restart.
+# The pinned ids never change: `web-tool` is one provider per capability, and it
+# dispatches to tavily / exa / firecrawl according to `searchBackend` and
+# `fetchBackend` below. Switching backends therefore does not touch this file —
+# the settings page writes those two fields through the config editor.
 - insert:
-    - id: web-search-provider
-      name: 'dsh-web-search-provider'
+    - id: web-tool-provider
+      name: 'dsh-web-tool-provider'
       config:
-        tavilyApiKeyEnv: TAVILY_API_KEY
-        firecrawlApiKeyEnv: FIRECRAWL_API_KEY
+        searchBackend: tavily
+        fetchBackend: firecrawl
         fallbackToHttp: true
 
 - id: web
   name: '@deepseek-ai/dsh-web'
   config:
-    searchProvider: tavily
-    fetchProvider: firecrawl
+    searchProvider: web-tool
+    fetchProvider: web-tool

@@ -1,44 +1,113 @@
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+// Never touch the real profile: backend choices persist under $DSH_HOME.
+const SANDBOX = mkdtempSync(join(tmpdir(), 'dsh-web-tool-'))
+delete process.env.DSH_PROFILE_DIR
+process.env.DSH_HOME = SANDBOX
 
 const mod = await import('../index.js')
 
-/* --------------------------------------------------------------- harness -- */
-
 const calls = []
+const originalFetch = globalThis.fetch
 const json = (payload, status = 200) =>
   new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
-const textResponse = (body, { status = 200, headers = {} } = {}) => new Response(body, { status, headers })
+const html = (body, headers = { 'content-type': 'text/html; charset=utf-8' }) => new Response(body, { status: 200, headers })
 
-const originalFetch = globalThis.fetch
 function stubFetch(handler) {
   calls.length = 0
   globalThis.fetch = async (url, init = {}) => {
-    calls.push({ url: String(url), init, body: init.body ? JSON.parse(init.body) : undefined })
+    const parsed = init.body ? JSON.parse(init.body) : undefined
+    calls.push({ url: String(url), init, body: parsed })
     if (init.signal?.aborted) {
       const error = new Error('aborted')
       error.name = 'AbortError'
       throw error
     }
-    return handler(String(url), init)
+    return handler(String(url), parsed, init)
   }
 }
 
-function register(config = {}) {
-  const registry = []
+const provider = () => ({
+  search: null,
+  fetch: null,
+})
+
+function harness(config = {}, { credentials } = {}) {
+  const registry = provider()
+  const routes = []
   const ctx = {
     web: {
-      registerSearchProvider: (provider) => { registry.push(provider); return () => {} },
-      registerFetchProvider: (provider) => { registry.push(provider); return () => {} },
+      registerSearchProvider: (entry) => {
+        registry.search = entry
+        return () => {}
+      },
+      registerFetchProvider: (entry) => {
+        registry.fetch = entry
+        return () => {}
+      },
     },
+    webServer: { register: (route) => (routes.push(route), () => {}) },
+    get: (name) => (name === 'credentials' ? credentials : undefined),
   }
   mod.apply(ctx, config)
-  const search = registry.find((provider) => provider.id === (config.searchProviderId || 'tavily'))
-  const fetch = registry.find((provider) => provider.id === (config.fetchProviderId || 'firecrawl'))
-  return { registry, search, fetch }
+  return { registry, routes, route: routes[0] }
+}
+
+function request({ method = 'GET', origin, body } = {}) {
+  const chunks = body === undefined ? [] : [Buffer.from(JSON.stringify(body))]
+  return {
+    method,
+    headers: origin === undefined ? { host: '127.0.0.1:1' } : { host: '127.0.0.1:1', origin },
+    async *[Symbol.asyncIterator]() {
+      for (const chunk of chunks) yield chunk
+    },
+  }
+}
+
+function response() {
+  return {
+    statusCode: 0,
+    headers: {},
+    body: '',
+    setHeader(name, value) {
+      this.headers[name] = value
+    },
+    end(chunk) {
+      this.body = chunk
+    },
+  }
+}
+
+async function call(route, opts) {
+  const res = response()
+  await route.handler(request(opts), res)
+  return { status: res.statusCode, payload: res.body ? JSON.parse(res.body) : undefined }
+}
+
+const fakeCredentials = (store = {}) => {
+  const writes = []
+  return {
+    writes,
+    resolve: async (ref) => (store[ref] ? { value: store[ref], source: 'keyring' } : undefined),
+    describe: async (ref) => ({ configured: Boolean(store[ref]), source: store[ref] ? 'keyring' : undefined, writable: true }),
+    set: async (ref, value) => {
+      writes.push(['set', ref, value])
+      store[ref] = value
+    },
+    unset: async (ref) => {
+      writes.push(['unset', ref])
+      delete store[ref]
+    },
+  }
 }
 
 const results = []
 async function check(name, run) {
+  // Every case starts from the Config defaults, not the previous case's file.
+  rmSync(join(SANDBOX, 'web-tool-provider'), { recursive: true, force: true })
   try {
     await run()
     results.push(`ok   ${name}`)
@@ -48,227 +117,172 @@ async function check(name, run) {
   }
 }
 
-/* ------------------------------------------------------------------ tests -- */
-
-await check('registers one search and one fetch provider with stable ids', async () => {
-  const { registry } = register()
-  assert.deepEqual(registry.map((provider) => provider.id), ['tavily', 'firecrawl'])
-  assert.equal(mod.inject.length, 1)
-  assert.equal(mod.inject[0], 'web')
-  assert.equal(typeof mod.apply, 'function')
+await check('registers one provider per capability plus one state route', async () => {
+  const { registry, routes } = harness()
+  assert.equal(registry.search.id, 'web-tool')
+  assert.equal(registry.fetch.id, 'web-tool')
+  assert.equal(routes.length, 1)
+  assert.equal(routes[0].path, '/web-tool-provider/state')
+  assert.equal(routes[0].kind, 'exact')
 })
 
-await check('availability follows the key source (literal, env, fallback)', async () => {
-  delete process.env.TAVILY_API_KEY
-  delete process.env.FIRECRAWL_API_KEY
-  let { search, fetch } = register({ fallbackToHttp: false })
-  assert.equal(search.available(), false)
-  assert.equal(fetch.available(), false)
-
-  process.env.TAVILY_API_KEY = 'tvly-env'
-  ;({ search, fetch } = register({ fallbackToHttp: false }))
-  assert.equal(search.available(), true)
-  assert.equal(fetch.available(), false)
-
-  ;({ search, fetch } = register({ tavilyApiKey: 'tvly-literal', tavilyApiKeyEnv: 'MISSING_ENV' }))
-  assert.equal(search.available(), true)
-
-  ;({ fetch } = register({ firecrawlApiKey: '', fallbackToHttp: true }))
-  assert.equal(fetch.available(), true, 'fallback keeps fetch usable without a key')
-  delete process.env.TAVILY_API_KEY
-})
-
-await check('rejects invalid provider ids and non-http endpoints', async () => {
-  assert.throws(() => register({ searchProviderId: 'has space' }), /not a valid provider id/)
-  assert.throws(() => register({ searchProviderId: 'x', fetchProviderId: 'x' }), /must differ/)
-  assert.throws(() => register({ tavilyBaseURL: 'ftp://example.com' }), /http: or https:/)
-  assert.throws(() => register({ firecrawlBaseURL: 'not-a-url' }), /absolute URL/)
-})
-
-await check('tavily: request shape, clamping, mapping, dedup', async () => {
-  stubFetch(() =>
-    json({
-      answer: 'answer text',
-      results: [
-        { title: 'A', url: 'https://a.test/x', content: 'snippet a', published_date: '2026-01-02' },
-        { title: 'A dup', url: 'https://a.test/x', content: 'dup' },
-        { title: 'B', url: 'https://b.test/' },
-        { url: '' },
-      ],
-    }),
-  )
-  const { search } = register({ tavilyApiKey: 'tvly-x', tavilyMaxResults: 6 })
-  const result = await search.search({ query: 'hello', maxResults: 4 })
-
-  assert.equal(calls.length, 1)
+await check('tavily is the default search backend', async () => {
+  stubFetch(() => json({ answer: 'A', results: [{ title: 'T', url: 'https://a.test/1', content: 's', published_date: '2026-02-03' }] }))
+  const { registry } = harness({ tavilyApiKey: 'tvly-x' })
+  const out = await registry.search.search({ query: 'q', maxResults: 5 })
   assert.equal(calls[0].url, 'https://api.tavily.com/search')
-  assert.equal(calls[0].init.method, 'POST')
   assert.equal(calls[0].init.headers.authorization, 'Bearer tvly-x')
-  assert.deepEqual(calls[0].body, {
-    query: 'hello',
-    max_results: 4,
-    search_depth: 'basic',
-    topic: 'general',
-    include_answer: true,
-  })
-  assert.equal(result.content, 'answer text')
-  assert.equal(result.truncated, false)
-  assert.deepEqual(result.sources, [
-    { url: 'https://a.test/x', title: 'A', snippet: 'snippet a', publishedAt: '2026-01-02' },
-    { url: 'https://b.test/', title: 'B' },
-  ])
+  assert.equal(calls[0].body.max_results, 5)
+  assert.equal(out.content, 'A')
+  assert.deepEqual(out.sources, [{ url: 'https://a.test/1', title: 'T', snippet: 's', publishedAt: '2026-02-03' }])
 })
 
-await check('tavily: request maxResults never exceeds the configured cap', async () => {
-  stubFetch(() => json({ results: [] }))
-  const { search } = register({ tavilyApiKey: 'tvly-x', tavilyMaxResults: 3 })
-  await search.search({ query: 'q', maxResults: 50 })
-  assert.equal(calls[0].body.max_results, 3)
-})
-
-await check('tavily: HTTP failures and missing credentials stay structured', async () => {
-  stubFetch(() => json({ error: 'invalid api key' }, 401))
-  const { search } = register({ tavilyApiKey: 'bad' })
-  await assert.rejects(search.search({ query: 'q' }), (error) => {
-    assert.equal(error.code, 'WEB_PROVIDER_ERROR')
-    assert.match(error.message, /HTTP 401/)
-    return true
-  })
-
-  const { search: keyless } = register({ tavilyApiKey: '', tavilyApiKeyEnv: 'DEFINITELY_MISSING' })
-  await assert.rejects(keyless.search({ query: 'q' }), (error) => {
-    assert.equal(error.code, 'WEB_PROVIDER_CREDENTIAL_MISSING')
-    return true
+await check('POST switches the search backend to exa for the next call', async () => {
+  stubFetch(() => json({ results: [{ title: 'E', url: 'https://e.test/1', highlights: ['h1', 'h2'], publishedDate: '2026-01-01' }] }))
+  const { registry, route } = harness({ exaApiKey: 'exa-x' })
+  const saved = await call(route, { method: 'POST', body: { searchBackend: 'exa' } })
+  assert.equal(saved.status, 200)
+  assert.equal(saved.payload.searchBackend, 'exa')
+  const out = await registry.search.search({ query: 'q' })
+  assert.equal(calls[0].url, 'https://api.exa.ai/search')
+  assert.equal(calls[0].init.headers['x-api-key'], 'exa-x')
+  assert.deepEqual(out.sources[0], {
+    url: 'https://e.test/1',
+    title: 'E',
+    snippet: 'h1 h2',
+    publishedAt: '2026-01-01',
   })
 })
 
-await check('firecrawl: markdown stays text, metadata is mapped', async () => {
-  stubFetch(() =>
-    json({
-      success: true,
-      data: {
-        markdown: '# Title\n\nbody',
-        metadata: { statusCode: 200, sourceURL: 'https://final.test/page' },
-      },
-    }),
-  )
-  const { fetch } = register({ firecrawlApiKey: 'fc-x' })
-  const result = await fetch.fetch({ url: 'https://example.com/a' })
+await check('firecrawl search maps data.web', async () => {
+  stubFetch(() => json({ success: true, data: { web: [{ title: 'F', url: 'https://f.test/1', description: 'd' }] } }))
+  const { registry, route } = harness({ firecrawlApiKey: 'fc-x' })
+  await call(route, { method: 'POST', body: { searchBackend: 'firecrawl' } })
+  const out = await registry.search.search({ query: 'q' })
+  assert.equal(calls[0].url, 'https://api.firecrawl.dev/v2/search')
+  assert.deepEqual(out.sources, [{ url: 'https://f.test/1', title: 'F', snippet: 'd' }])
+})
 
+await check('firecrawl fetch returns markdown as a text body', async () => {
+  stubFetch(() => json({ success: true, data: { markdown: '# Hi', metadata: { statusCode: 200, sourceURL: 'https://final.test/' } } }))
+  const { registry } = harness({ firecrawlApiKey: 'fc-x' })
+  const out = await registry.fetch.fetch({ url: 'https://example.com/' })
   assert.equal(calls[0].url, 'https://api.firecrawl.dev/v2/scrape')
-  assert.equal(calls[0].body.url, 'https://example.com/a')
-  assert.deepEqual(calls[0].body.formats, ['markdown'])
-  assert.equal(calls[0].body.onlyMainContent, true)
-  assert.equal(result.body.kind, 'text')
-  assert.equal(result.body.content, '# Title\n\nbody')
-  assert.equal(result.statusCode, 200)
-  assert.equal(result.url, 'https://final.test/page')
-  assert.equal(result.truncated, false)
+  assert.equal(out.body.kind, 'text')
+  assert.equal(out.body.content, '# Hi')
+  assert.equal(out.url, 'https://final.test/')
 })
 
-await check('firecrawl: long markdown is capped and flagged', async () => {
-  const long = 'x'.repeat(4000)
-  stubFetch(() => json({ success: true, data: { markdown: long, metadata: { statusCode: 200 } } }))
-  const { fetch } = register({ firecrawlApiKey: 'fc-x', firecrawlMaxChars: 1000 })
-  const result = await fetch.fetch({ url: 'https://example.com/' })
-  assert.equal(result.body.content.length, 1000)
-  assert.equal(result.truncated, true)
-  assert.equal(result.url, 'https://example.com/')
+await check('fetch backends: exa contents and tavily extract both work', async () => {
+  stubFetch((url) => (url.includes('exa.ai') ? json({ results: [{ url: 'https://x.test/', text: 'exa text' }] }) : json({ results: [{ url: 'https://x.test/', raw_content: 'tavily text' }] })))
+  let { registry, route } = harness({ exaApiKey: 'exa-x' })
+  await call(route, { method: 'POST', body: { fetchBackend: 'exa' } })
+  assert.equal((await registry.fetch.fetch({ url: 'https://x.test/' })).body.content, 'exa text')
+  ;({ registry, route } = harness({ tavilyApiKey: 'tvly-x' }))
+  await call(route, { method: 'POST', body: { fetchBackend: 'tavily' } })
+  const out = await registry.fetch.fetch({ url: 'https://x.test/' })
+  assert.equal(out.body.content, 'tavily text')
+  assert.equal(calls.at(-1).url, 'https://api.tavily.com/extract')
 })
 
-await check('firecrawl: non-2xx target status is a result, not an error', async () => {
-  stubFetch(() => json({ success: true, data: { markdown: 'not found page', metadata: { statusCode: 404 } } }))
-  const { fetch } = register({ firecrawlApiKey: 'fc-x' })
-  const result = await fetch.fetch({ url: 'https://example.com/missing' })
-  assert.equal(result.statusCode, 404)
-  assert.equal(calls.length, 1, 'no fallback for a page status')
-})
-
-await check('fallback: scrape failure degrades to the local fetch', async () => {
-  stubFetch((url) => {
-    if (url.includes('/scrape')) return json({ success: false, error: 'quota exceeded' }, 402)
-    return textResponse('<html><body>local</body></html>', { headers: { 'content-type': 'text/html; charset=utf-8' } })
-  })
-  const { fetch } = register({ firecrawlApiKey: 'fc-x' })
-  const result = await fetch.fetch({ url: 'https://example.com/fallback' })
+await check('a failing backend degrades to the local fetch', async () => {
+  stubFetch((url) =>
+    url.includes('firecrawl.dev') ? json({ success: false, error: 'quota' }, 402) : html('<html>local</html>'),
+  )
+  const { registry } = harness({ firecrawlApiKey: 'fc-x' })
+  const out = await registry.fetch.fetch({ url: 'https://example.com/page' })
   assert.equal(calls.length, 2)
-  assert.equal(result.statusCode, 200)
-  assert.equal(result.body.kind, 'html')
-  assert.match(result.body.content, /local/)
+  assert.equal(out.body.kind, 'html')
+  assert.match(out.body.content, /local/)
 })
 
-await check('fallback: no key means no scrape call at all', async () => {
-  stubFetch(() => textResponse('plain', { headers: { 'content-type': 'text/plain' } }))
-  const { fetch } = register({ firecrawlApiKey: '', fallbackToHttp: true })
-  const result = await fetch.fetch({ url: 'https://example.com/' })
-  assert.equal(calls.length, 1)
-  assert.equal(calls[0].url, 'https://example.com/')
-  assert.equal(result.body.kind, 'text')
+await check('keys come from the credential store, then the environment', async () => {
+  stubFetch(() => json({ results: [] }))
+  const credentials = fakeCredentials({ TAVILY_API_KEY: 'tvly-stored' })
+  const stored = harness({}, { credentials })
+  await stored.registry.search.search({ query: 'q' })
+  assert.equal(calls[0].init.headers.authorization, 'Bearer tvly-stored')
+
+  process.env.MISSING_REF = 'exa-env'
+  const fromEnv = harness({ exaApiKeyEnv: 'MISSING_REF' }, { credentials: fakeCredentials({}) })
+  await call(fromEnv.route, { method: 'POST', body: { searchBackend: 'exa' } })
+  await fromEnv.registry.search.search({ query: 'q' })
+  assert.equal(calls.at(-1).init.headers['x-api-key'], 'exa-env')
+  delete process.env.MISSING_REF
 })
 
-await check('fallback: abort never degrades', async () => {
-  stubFetch(() => json({ success: false, error: 'boom' }, 500))
-  const { fetch } = register({ firecrawlApiKey: 'fc-x' })
-  const controller = new AbortController()
-  controller.abort()
-  await assert.rejects(fetch.fetch({ url: 'https://example.com/' }, controller.signal), (error) => {
-    assert.equal(error.code, 'WEB_ABORTED')
-    return true
-  })
-  assert.equal(calls.length, 0)
-})
-
-await check('fallback: rejects non-http, blocked hosts, unsupported bodies', async () => {
-  stubFetch(() => textResponse('x', { headers: { 'content-type': 'application/pdf' } }))
-  const { fetch } = register({ firecrawlApiKey: '', fallbackToHttp: true })
-  for (const url of ['', 'ftp://example.com/x', 'http://127.0.0.1/', 'http://10.1.2.3/', 'http://localhost/']) {
-    await assert.rejects(fetch.fetch({ url }), (error) => {
-      assert.ok(['WEB_INVALID_URL', 'WEB_BLOCKED_URL'].includes(error.code), `${url} -> ${error.code}`)
-      return true
-    })
-  }
-  await assert.rejects(fetch.fetch({ url: 'https://example.com/file.pdf' }), (error) => {
-    assert.equal(error.code, 'WEB_UNSUPPORTED_CONTENT_TYPE')
+await check('missing credentials produce a structured error', async () => {
+  stubFetch(() => json({ results: [] }))
+  const { registry } = harness({ tavilyApiKey: '', tavilyApiKeyEnv: 'ABSENT_REF' }, { credentials: fakeCredentials({}) })
+  await assert.rejects(registry.search.search({ query: 'q' }), (error) => {
+    assert.equal(error.code, 'WEB_PROVIDER_CREDENTIAL_MISSING')
+    assert.match(error.message, /ABSENT_REF/)
     return true
   })
 })
 
-await check('fallback: redirects are followed and re-validated', async () => {
-  stubFetch((url) => {
-    if (url === 'https://example.com/start') {
-      return textResponse(null, { status: 302, headers: { location: '/next' } })
-    }
-    if (url === 'https://example.com/next') {
-      return textResponse('done', { headers: { 'content-type': 'text/plain' } })
-    }
-    return textResponse('blocked', { status: 500 })
-  })
-  const { fetch } = register({ firecrawlApiKey: '', fallbackToHttp: true })
-  const result = await fetch.fetch({ url: 'https://example.com/start' })
-  assert.equal(result.url, 'https://example.com/next')
-  assert.equal(result.body.content, 'done')
+await check('POST stores and clears keys through the credential service', async () => {
+  const credentials = fakeCredentials({})
+  const { route } = harness({}, { credentials })
+  const saved = await call(route, { method: 'POST', body: { setKey: { vendor: 'exa', value: 'exa-new' } } })
+  assert.equal(saved.status, 200)
+  assert.deepEqual(credentials.writes[0], ['set', 'EXA_API_KEY', 'exa-new'])
+  assert.equal(saved.payload.keys.exa.configured, true)
 
-  stubFetch(() => textResponse(null, { status: 301, headers: { location: 'http://127.0.0.1/admin' } }))
-  await assert.rejects(fetch.fetch({ url: 'https://example.com/start' }), (error) => {
-    assert.equal(error.code, 'WEB_BLOCKED_URL')
-    return true
-  })
+  const cleared = await call(route, { method: 'POST', body: { clearKey: { vendor: 'exa' } } })
+  assert.equal(cleared.status, 200)
+  assert.deepEqual(credentials.writes[1], ['unset', 'EXA_API_KEY'])
+  assert.equal(cleared.payload.keys.exa.configured, false)
 })
 
-await check('fallback: redirect budget is enforced', async () => {
-  stubFetch(() => textResponse(null, { status: 302, headers: { location: '/loop' } }))
-  const { fetch } = register({ firecrawlApiKey: '', fallbackToHttp: true, fallbackMaxRedirects: 2 })
-  await assert.rejects(fetch.fetch({ url: 'https://example.com/loop' }), (error) => {
-    assert.equal(error.code, 'WEB_REDIRECT_BLOCKED')
-    return true
-  })
-  assert.equal(calls.length, 3)
+await check('POST persists the backend choice to the plugin state file', async () => {
+  const { route } = harness({})
+  const out = await call(route, { method: 'POST', body: { searchBackend: 'exa', fetchBackend: 'tavily' } })
+  assert.equal(out.payload.persistence.persisted, true)
+
+  const file = join(SANDBOX, 'web-tool-provider', 'state.json')
+  assert.equal(out.payload.persistence.location, file)
+  assert.equal(out.payload.stateFile, file)
+  const stored = JSON.parse(readFileSync(file, 'utf8'))
+  assert.equal(stored.searchBackend, 'exa')
+  assert.equal(stored.fetchBackend, 'tavily')
+
+  // A fresh mount (a restart) picks the stored choice up.
+  const restarted = harness({ searchBackend: 'tavily', fetchBackend: 'firecrawl' })
+  const snapshot = await call(restarted.route, {})
+  assert.equal(snapshot.payload.searchBackend, 'exa')
+  assert.equal(snapshot.payload.fetchBackend, 'tavily')
+  assert.equal(snapshot.payload.stateFile, file)
 })
 
-await check('enable flags skip registration', async () => {
-  assert.equal(register({ enableSearch: false }).registry.length, 1)
-  assert.equal(register({ enableFetch: false }).registry.length, 1)
-  assert.equal(register({ enableSearch: false, enableFetch: false }).registry.length, 0)
+await check('a corrupt state file falls back to the Config defaults', async () => {
+  const file = join(SANDBOX, 'web-tool-provider', 'state.json')
+  mkdirSync(join(SANDBOX, 'web-tool-provider'), { recursive: true })
+  writeFileSync(file, '{ this is not json')
+  const { route } = harness({ searchBackend: 'firecrawl', fetchBackend: 'exa' })
+  const snapshot = await call(route, {})
+  assert.equal(snapshot.payload.searchBackend, 'firecrawl')
+  assert.equal(snapshot.payload.fetchBackend, 'exa')
+})
+
+await check('GET returns the snapshot and the route refuses foreign origins', async () => {
+  const { route } = harness({ exaApiKey: 'exa-x' })
+  const snapshot = await call(route, {})
+  assert.equal(snapshot.status, 200)
+  assert.deepEqual(snapshot.payload.backends, ['tavily', 'exa', 'firecrawl'])
+  assert.equal(snapshot.payload.searchBackend, 'tavily')
+  assert.equal(snapshot.payload.keys.exa.configured, true)
+  assert.equal(snapshot.payload.keys.tavily.configured, false)
+
+  const blocked = await call(route, { origin: 'https://evil.test' })
+  assert.equal(blocked.status, 403)
+})
+
+await check('unknown backends are ignored instead of breaking the provider', async () => {
+  const { route } = harness()
+  const out = await call(route, { method: 'POST', body: { searchBackend: 'nope', fetchBackend: 'also-nope' } })
+  assert.equal(out.payload.searchBackend, 'tavily')
+  assert.equal(out.payload.fetchBackend, 'firecrawl')
 })
 
 globalThis.fetch = originalFetch

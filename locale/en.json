@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Web Search Provider (Tavily + Firecrawl)",
-    "description": "Swaps the engine behind web_search and web_fetch: Tavily for search, Firecrawl for page fetch, with a credential-free local fetch fallback."
+    "title": "Web Tool Provider (Tavily · Exa · Firecrawl)",
+    "description": "Pick the backend behind web_search and web_fetch — Tavily, Exa or Firecrawl — and store each key from a settings page, with a credential-free local fetch fallback."
   }
 }
