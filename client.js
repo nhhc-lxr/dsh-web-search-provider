@@ -7,7 +7,6 @@ window.__ModuleLoader__.load({
     const ENDPOINT = '/web-tool-provider/state'
     const VENDORS = ['tavily', 'exa', 'firecrawl']
     const DEPTH = ['auto', 'fast', 'balanced', 'deep']
-    const ANSWER = ['auto', 'on', 'off']
     const TOPICS = ['general', 'news', 'finance']
     const TYPES = ['auto', 'lite', 'deep']
     const VERSIONS = ['v2', 'v1']
@@ -39,10 +38,9 @@ window.__ModuleLoader__.load({
         unsupported: 'unsupported',
         maxResults: 'Results per query',
         depth: 'Search depth',
-        answer: 'Synthesized answer',
-        strict: 'Strict mode — fail instead of ignoring an unsupported option',
         includeDomains: 'Only these domains',
         excludeDomains: 'Exclude these domains',
+        answer: 'Return a synthesized answer',
         fallback: 'Fall back to a direct HTTP fetch when the backend fails',
         baseURL: 'API base URL',
         timeoutMs: 'Timeout (ms)',
@@ -59,8 +57,6 @@ window.__ModuleLoader__.load({
         perCall: 'Applies to the next call — no restart needed.',
         domainsPlaceholder: 'a.com, b.com',
         auto: 'auto',
-        on: 'on',
-        off: 'off',
         fast: 'fast',
         balanced: 'balanced',
         deep: 'deep',
@@ -99,10 +95,9 @@ window.__ModuleLoader__.load({
         unsupported: '不支持',
         maxResults: '每次查询条数',
         depth: '检索深度',
-        answer: '合成答案',
-        strict: '严格模式——不支持的选项直接报错，而不是忽略',
         includeDomains: '只搜这些域名',
         excludeDomains: '排除这些域名',
+        answer: '返回合成答案',
         fallback: '后端失败时退回直接 HTTP 抓取',
         baseURL: '接口地址',
         timeoutMs: '超时（毫秒）',
@@ -119,8 +114,6 @@ window.__ModuleLoader__.load({
         perCall: '下一次调用即生效，不用重启。',
         domainsPlaceholder: 'a.com, b.com',
         auto: '自动',
-        on: '开启',
-        off: '关闭',
         fast: '快',
         balanced: '均衡',
         deep: '深度',
@@ -432,16 +425,6 @@ window.__ModuleLoader__.load({
             }),
           supportFor('depth'),
         ),
-        selectRow(
-          t('answer'),
-          state.search.options.answer,
-          ANSWER,
-          (value) =>
-            edit((next) => {
-              next.search.options.answer = value
-            }),
-          supportFor('answer'),
-        ),
         textRow(
           t('includeDomains'),
           joinDomains(state.search.options.includeDomains),
@@ -459,25 +442,6 @@ window.__ModuleLoader__.load({
               next.search.options.excludeDomains = splitDomains(value)
             }),
           t('domainsPlaceholder'),
-        ),
-        h(
-          'div',
-          { style: styles.row },
-          h('span', { style: styles.label }, ''),
-          h(
-            'label',
-            { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 } },
-            h('input', {
-              type: 'checkbox',
-              checked: Boolean(state.search.options.strict),
-              disabled: busy,
-              onChange: (event) =>
-                edit((next) => {
-                  next.search.options.strict = event.target.checked
-                }),
-            }),
-            t('strict'),
-          ),
         ),
       )
 
@@ -544,6 +508,25 @@ window.__ModuleLoader__.load({
               edit((next) => {
                 next.providers.tavily.searchDepth = value
               }),
+            ),
+            h(
+              'div',
+              { style: styles.row, key: 'answer' },
+              h('span', { style: styles.label }, ''),
+              h(
+                'label',
+                { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 } },
+                h('input', {
+                  type: 'checkbox',
+                  checked: Boolean(provider.answer),
+                  disabled: busy,
+                  onChange: (event) =>
+                    edit((next) => {
+                      next.providers.tavily.answer = event.target.checked
+                    }),
+                }),
+                t('answer'),
+              ),
             ),
           )
         }

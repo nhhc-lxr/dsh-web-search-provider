@@ -3,11 +3,15 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-// Never touch the real profile: settings persist under $DSH_HOME.
+// Never touch the real profile: settings persist under $DSH_HOME, and the
+// homedir fallback is sandboxed too so a developer's own state file cannot
+// leak into the assertions.
 const SANDBOX = mkdtempSync(join(tmpdir(), 'dsh-web-tool-'))
 delete process.env.DSH_PROFILE_DIR
 delete process.env.DSH_HOME
 process.env.DSH_HOME = SANDBOX
+process.env.USERPROFILE = SANDBOX
+process.env.HOME = SANDBOX
 
 const mod = await import('../index.js')
 
@@ -198,24 +202,23 @@ await check('the same shared options reach firecrawl as ITS parameters', async (
 
 /* ------------------------------------------------------ degrade + strict -- */
 
-await check('unsupported options become notices on the answer', async () => {
+await check('an unsupported shared option becomes a notice, never a failure', async () => {
   stubFetch(() => json({ success: true, data: { web: [{ title: 'T', url: 'https://x.test/', description: 'd' }] } }))
   const { registry, route } = harness(KEYS)
-  await call(route, { method: 'POST', body: { search: { backend: 'firecrawl', options: { depth: 'deep', answer: 'on' } } } })
+  await call(route, { method: 'POST', body: { search: { backend: 'firecrawl', options: { depth: 'deep' } } } })
   const out = await registry.search.search({ query: 'q' })
   assert.match(out.content, /> provider notice: firecrawl cannot honour "depth"/)
-  assert.match(out.content, /> provider notice: firecrawl cannot honour "answer"/)
   assert.equal(out.sources.length, 1)
 })
 
-await check('strict mode turns an unsupported option into an error', async () => {
-  stubFetch(() => json({ success: true, data: { web: [] } }))
+await check('the synthesized answer is a tavily setting, not a shared one', async () => {
+  stubFetch(() => json(TAVILY))
   const { registry, route } = harness(KEYS)
-  await call(route, { method: 'POST', body: { search: { backend: 'firecrawl', options: { depth: 'deep', strict: true } } } })
-  await assert.rejects(registry.search.search({ query: 'q' }), (error) => {
-    assert.equal(error.code, 'WEB_PROVIDER_BAD_REQUEST')
-    return true
-  })
+  await registry.search.search({ query: 'q' })
+  assert.equal(calls[0].body.include_answer, true)
+  await call(route, { method: 'POST', body: { providers: { tavily: { answer: false } } } })
+  await registry.search.search({ query: 'q' })
+  assert.equal('include_answer' in calls.at(-1).body, false)
 })
 
 await check('an empty result set is reported to the model', async () => {
@@ -305,9 +308,12 @@ await check('GET exposes the layered shape and the capability matrix', async () 
   assert.equal(payload.fetch.backend, 'firecrawl')
   assert.equal(payload.fetch.options.fallbackToHttp, true)
   assert.equal(payload.providers.tavily.topic, 'general')
+  assert.equal(payload.providers.tavily.answer, true)
   assert.equal(payload.providers.firecrawl.version, 'v2')
+  assert.equal(payload.search.options.answer, undefined)
+  assert.equal(payload.search.options.strict, undefined)
   assert.equal(payload.capabilities.firecrawl.search.depth, 'no')
-  assert.equal(payload.capabilities.tavily.search.answer, 'yes')
+  assert.equal(payload.capabilities.tavily.search.depth, 'yes')
   assert.equal(payload.providers.tavily.apiKey, undefined)
 })
 
@@ -316,7 +322,7 @@ await check('POST persists settings per layer and a restart picks them up', asyn
   const out = await call(route, {
     method: 'POST',
     body: {
-      search: { backend: 'exa', options: { answer: 'on', includeDomains: ['a.com', 'b.com'] } },
+      search: { backend: 'exa', options: { maxResults: 6, includeDomains: ['a.com', 'b.com'] } },
       providers: { firecrawl: { maxAge: 60000, version: 'v1' } },
     },
   })
@@ -329,7 +335,7 @@ await check('POST persists settings per layer and a restart picks them up', asyn
   const restarted = harness({})
   const snapshot = await call(restarted.route, {})
   assert.equal(snapshot.payload.search.backend, 'exa')
-  assert.equal(snapshot.payload.search.options.answer, 'on')
+  assert.equal(snapshot.payload.search.options.maxResults, 6)
   assert.deepEqual(snapshot.payload.search.options.includeDomains, ['a.com', 'b.com'])
   assert.equal(snapshot.payload.providers.firecrawl.maxAge, 60000)
 })

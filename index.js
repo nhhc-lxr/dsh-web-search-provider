@@ -42,7 +42,6 @@ const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308])
 const BODY_LIMIT_BYTES = 64 * 1024
 const SNIPPET_CHARS = 400
 const DEPTH_VALUES = ['auto', 'fast', 'balanced', 'deep']
-const ANSWER_VALUES = ['auto', 'on', 'off']
 
 export const name = PLUGIN
 export const inject = ['web', 'webServer']
@@ -141,8 +140,6 @@ function defaultsFromConfig(config) {
       options: {
         maxResults: asInteger(config.searchMaxResults, 8, 1, 100),
         depth: oneOf(config.searchDepth, DEPTH_VALUES, 'auto'),
-        answer: oneOf(config.searchAnswer, ANSWER_VALUES, 'auto'),
-        strict: asBoolean(config.searchStrict, false),
         includeDomains: domainList(config.includeDomains),
         excludeDomains: domainList(config.excludeDomains),
       },
@@ -160,6 +157,7 @@ function defaultsFromConfig(config) {
         apiKeyEnv: text(config.tavilyApiKeyEnv) || CREDENTIAL_REF.tavily,
         topic: oneOf(config.tavilyTopic, ['general', 'news', 'finance'], 'general'),
         searchDepth: oneOf(config.tavilySearchDepth, ['basic', 'advanced'], 'basic'),
+        answer: asBoolean(config.tavilyIncludeAnswer, true),
       },
       exa: {
         baseURL: stripSlash(text(config.exaBaseURL) || 'https://api.exa.ai'),
@@ -208,8 +206,6 @@ function mergeSettings(base, patch) {
     const target = next.search.options
     if (incoming.maxResults !== undefined) target.maxResults = asInteger(incoming.maxResults, target.maxResults, 1, 100)
     if (incoming.depth !== undefined) target.depth = oneOf(incoming.depth, DEPTH_VALUES, target.depth)
-    if (incoming.answer !== undefined) target.answer = oneOf(incoming.answer, ANSWER_VALUES, target.answer)
-    if (incoming.strict !== undefined) target.strict = asBoolean(incoming.strict, target.strict)
     if (incoming.includeDomains !== undefined) target.includeDomains = domainList(incoming.includeDomains)
     if (incoming.excludeDomains !== undefined) target.excludeDomains = domainList(incoming.excludeDomains)
   }
@@ -241,6 +237,7 @@ function mergeSettings(base, patch) {
         if (incoming.searchDepth !== undefined) {
           target.searchDepth = oneOf(incoming.searchDepth, ['basic', 'advanced'], target.searchDepth)
         }
+        if (incoming.answer !== undefined) target.answer = asBoolean(incoming.answer, target.answer)
       }
       if (vendor === 'exa' && incoming.searchType !== undefined) {
         target.searchType = oneOf(incoming.searchType, ['auto', 'lite', 'deep'], target.searchType)
@@ -259,15 +256,15 @@ function mergeSettings(base, patch) {
 
 const CAPABILITIES = {
   tavily: {
-    search: { domains: 'yes', depth: 'yes', answer: 'yes' },
+    search: { domains: 'yes', depth: 'yes' },
     fetch: { mainContent: 'no', cache: 'no' },
   },
   exa: {
-    search: { domains: 'yes', depth: 'yes', answer: 'no' },
+    search: { domains: 'yes', depth: 'yes' },
     fetch: { mainContent: 'no', cache: 'no' },
   },
   firecrawl: {
-    search: { domains: 'yes', depth: 'no', answer: 'no' },
+    search: { domains: 'yes', depth: 'no' },
     fetch: { mainContent: 'yes', cache: 'yes' },
   },
 }
@@ -280,10 +277,9 @@ const capabilityMatrix = () =>
     ]),
   )
 
-function dropOption(settings, notices, vendor, key, reason) {
-  const message = `${vendor} cannot honour "${key}": ${reason}`
-  if (settings.search.options.strict) throw providerError(message, 'WEB_PROVIDER_BAD_REQUEST')
-  notices.push(message)
+/** A shared option this backend cannot honour is reported, never silently dropped. */
+function dropOption(notices, vendor, key, reason) {
+  notices.push(`${vendor} cannot honour "${key}": ${reason}`)
 }
 
 /* -------------------------------------------------------------------- keys -- */
@@ -513,7 +509,7 @@ async function tavilySearch(ctx, settings, request, signal) {
     search_depth: options.depth === 'auto' ? provider.searchDepth : options.depth === 'deep' ? 'advanced' : 'basic',
     topic: provider.topic,
   }
-  if (options.answer !== 'off') body.include_answer = true
+  if (provider.answer) body.include_answer = true
   if (options.includeDomains.length > 0) body.include_domains = options.includeDomains
   if (options.excludeDomains.length > 0) body.exclude_domains = options.excludeDomains
 
@@ -545,9 +541,6 @@ async function exaSearch(ctx, settings, request, signal, notices) {
     numResults: clampResults(request, options.maxResults),
     contents: { highlights: true },
   }
-  if (options.answer === 'on') {
-    dropOption(settings, notices, 'exa', 'answer', 'it only synthesizes an answer for deep search types')
-  }
   if (options.includeDomains.length > 0) body.includeDomains = options.includeDomains
   if (options.excludeDomains.length > 0) body.excludeDomains = options.excludeDomains
 
@@ -571,10 +564,7 @@ async function firecrawlSearch(ctx, settings, request, signal, notices) {
     sources: ['web'],
   }
   if (options.depth !== 'auto') {
-    dropOption(settings, notices, 'firecrawl', 'depth', 'its search has no depth setting')
-  }
-  if (options.answer === 'on') {
-    dropOption(settings, notices, 'firecrawl', 'answer', 'its search returns no synthesized answer')
+    dropOption(notices, 'firecrawl', 'depth', 'its search has no depth setting')
   }
   if (options.includeDomains.length > 0) body.includeDomains = options.includeDomains
   if (options.excludeDomains.length > 0) body.excludeDomains = options.excludeDomains
