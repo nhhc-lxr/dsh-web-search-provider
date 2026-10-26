@@ -411,21 +411,16 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { style: styles.row },
-          h('span', { style: styles.label }, ''),
-          h(
-            'label',
-            { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 } },
-            h('input', {
-              type: 'checkbox',
-              checked: Boolean(state.fetch.options.fallbackToHttp),
-              disabled: busy,
-              onChange: (event) =>
-                edit((next) => {
-                  next.fetch.options.fallbackToHttp = event.target.checked
-                }),
-            }),
-            t('fallback'),
-          ),
+          h('span', { style: styles.label }, t('fallback')),
+          h('input', {
+            type: 'checkbox',
+            checked: Boolean(state.fetch.options.fallbackToHttp),
+            disabled: busy,
+            onChange: (event) =>
+              edit((next) => {
+                next.fetch.options.fallbackToHttp = event.target.checked
+              }),
+          }),
         ),
         h('p', { style: styles.note }, t('perCall')),
       )
@@ -511,21 +506,16 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 { style: styles.row, key: 'mainContent' },
-                h('span', { style: styles.label }, ''),
-                h(
-                  'label',
-                  { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 } },
-                  h('input', {
-                    type: 'checkbox',
-                    checked: Boolean(provider.mainContent),
-                    disabled: busy,
-                    onChange: (event) =>
-                      edit((next) => {
-                        next.providers.firecrawl.mainContent = event.target.checked
-                      }),
-                  }),
-                  t('mainContent'),
-                ),
+                h('span', { style: styles.label }, t('mainContent')),
+                h('input', {
+                  type: 'checkbox',
+                  checked: Boolean(provider.mainContent),
+                  disabled: busy,
+                  onChange: (event) =>
+                    edit((next) => {
+                      next.providers.firecrawl.mainContent = event.target.checked
+                    }),
+                }),
               ),
               numericRow(t('maxAge'), provider.maxAge, (value) =>
                 edit((next) => {
