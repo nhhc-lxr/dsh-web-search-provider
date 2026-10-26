@@ -110,6 +110,7 @@ window.__ModuleLoader__.load({
       row: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' },
       label: { fontSize: 12, minWidth: 130, color: 'var(--dsw-alias-label-secondary)' },
       select: {
+        boxSizing: 'border-box',
         flex: '1 1 180px',
         minWidth: 150,
         height: 30,
@@ -121,6 +122,7 @@ window.__ModuleLoader__.load({
         borderRadius: 7,
       },
       input: {
+        boxSizing: 'border-box',
         flex: '1 1 220px',
         minWidth: 170,
         height: 30,
@@ -132,6 +134,7 @@ window.__ModuleLoader__.load({
         borderRadius: 7,
       },
       button: {
+        boxSizing: 'border-box',
         height: 30,
         padding: '0 12px',
         fontSize: 12,
@@ -160,6 +163,7 @@ window.__ModuleLoader__.load({
         whiteSpace: 'nowrap',
       },
       iconButton: {
+        boxSizing: 'border-box',
         height: 30,
         width: 30,
         display: 'inline-flex',
@@ -504,7 +508,7 @@ window.__ModuleLoader__.load({
 
         return h(
           'div',
-          { key: vendor, style: { ...styles.row, flexWrap: 'nowrap', minHeight: 30, marginBottom: 8 } },
+          { key: vendor, style: { ...styles.row, flexWrap: 'nowrap', height: 34, marginBottom: 4 } },
           h('span', { style: styles.vendor }, labelOf(vendor)),
           keyBadge(t, key),
           editing
@@ -519,7 +523,7 @@ window.__ModuleLoader__.load({
                 disabled: busy,
                 onChange: (event) => setDraftKeys({ ...draftKeys, [vendor]: event.target.value }),
               })
-            : null,
+            : h('div', { key: 'spacer', style: { flex: '1 1 160px', minWidth: 130, height: 30 } }),
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto', flex: '0 0 auto' } },
